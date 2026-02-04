@@ -119,6 +119,22 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 #### CloudFront Setup
 
+**Why CloudFront is Required:**
+
+CloudFront provides critical security benefits:
+
+1. **Prevents Direct S3 Access** - With Origin Access Control (OAC), your S3 bucket can be configured to deny all direct public access. Only CloudFront can access the bucket, preventing anyone from bypassing your proxy server by guessing S3 URLs.
+
+2. **Private S3 Buckets** - Your S3 bucket remains completely private. Even if someone discovers your bucket name, they cannot access any files directly. All access must go through CloudFront, which only CloudFront (via OAC) can reach.
+
+3. **HTTPS Enforcement** - CloudFront enforces HTTPS for all asset delivery, ensuring encrypted connections for all media files.
+
+4. **Geo-Restrictions** - CloudFront allows you to restrict content delivery by geographic location if needed.
+
+5. **DDoS Protection** - CloudFront provides built-in AWS Shield Standard protection against DDoS attacks.
+
+**Setup Steps:**
+
 1. Go to **CloudFront** in AWS Console
 2. Click **Create Distribution**
 3. **Origin Settings**:
@@ -204,13 +220,14 @@ The built files will be in `contentful-app/build/`.
 #### Deploy to Contentful
 
 1. Build the app: `npm run build`
-2. Host the contents of `build/` folder on a static hosting service (Netlify, Vercel, S3+CloudFront, etc.)
-3. In Contentful:
+2. In Contentful:
    - Go to **Apps** → **Manage Apps**
    - Create new app or edit existing
-   - Set the app URL to your hosted location
+   - **Hosting Options:**
+     - **Option A (Recommended): Host in Contentful** - Upload the `build/` folder contents directly using Contentful's app hosting (available for organization apps)
+     - **Option B: External Hosting** - Host on a static hosting service (Netlify, Vercel, S3+CloudFront, etc.) and provide the URL
    - Configure installation parameters:
-     - **Proxy URL**: `http://localhost:5284` (or your deployed proxy URL)
+     - **Proxy URL**: `http://localhost:5284` (for development) or your deployed proxy URL (for production)
      - **API Key**: The same key from your proxy `.env` file
      - **CloudFront Domain**: Your CloudFront domain (without https://)
      - **Max Files**: Maximum number of files to allow selection (optional)
