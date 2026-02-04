@@ -27,6 +27,22 @@ graph LR
 5. **S3 objects are listed** and their URLs are generated using the CloudFront domain
 6. **Assets are delivered** through CloudFront CDN for optimal performance
 
+### Why a Proxy Server?
+
+The proxy server is essential for security and functionality:
+
+1. **AWS Credentials Protection** - AWS access keys never reach the browser. The frontend only knows a simple API key, while sensitive AWS credentials remain safely on the server.
+
+2. **Single API Key** - Instead of embedding AWS credentials in the Contentful app (where they could be exposed), you only pass a single revocable API key that has limited permissions.
+
+3. **CORS Handling** - The proxy server properly handles CORS headers, allowing the Contentful app to make cross-origin requests. Direct browser-to-S3 requests would be blocked by CORS policies.
+
+4. **Request Control** - The proxy can implement rate limiting, request validation, and logging - giving you control over how S3 is accessed.
+
+5. **Abstraction Layer** - If you need to change S3 buckets, AWS accounts, or even switch cloud providers, you only update the proxy server without touching the Contentful app.
+
+6. **No Client-Side AWS SDK** - Avoids bundling the large AWS SDK in your frontend, keeping the app lightweight.
+
 ## Project Structure
 
 ```
