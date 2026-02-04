@@ -2,6 +2,8 @@
 
 A Contentful app that allows browsing and selecting assets from an S3 bucket through a secure proxy server.
 
+> **Disclaimer:** This code is provided as-is for use as a reference implementation. It is not officially supported by Contentful. Use at your own discretion and modify as needed for your specific requirements.
+
 ## Architecture
 
 ```mermaid
