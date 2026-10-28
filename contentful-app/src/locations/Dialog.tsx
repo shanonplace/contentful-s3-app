@@ -12,6 +12,7 @@ import {
 } from "@contentful/f36-components";
 import { SearchIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
+import tokens from "@contentful/f36-tokens";
 import type { DialogInvocationParameters, S3Asset, S3Prefix } from "../types";
 import {
   fetchPrefixes,
@@ -26,19 +27,26 @@ import { AssetGrid } from "../components/AssetGrid";
 import { Breadcrumb } from "../components/Breadcrumb";
 
 const styles = {
+  // The dialog iframe is exactly the dialog body, so fill it: a column whose
+  // middle section flexes and scrolls while the footer stays pinned. The old
+  // fixed "80vh minus footer" height left a band of empty space underneath.
+  root: css({
+    display: "flex",
+    flexDirection: "column",
+    height: "100vh",
+  }),
   container: css({
     display: "flex",
-    height: "calc(80vh - 120px)",
-    minHeight: "500px",
+    flex: 1,
+    minHeight: 0,
   }),
   sidebar: css({
-    width: "280px",
-    minWidth: "200px",
-    maxWidth: "400px",
-    borderRight: "1px solid #e5e5e5",
+    width: "260px",
+    flexShrink: 0,
+    borderRight: `1px solid ${tokens.gray200}`,
     overflowY: "auto",
-    padding: "16px",
-    backgroundColor: "#fafafa",
+    padding: tokens.spacingM,
+    backgroundColor: tokens.gray100,
   }),
   main: css({
     flex: 1,
@@ -47,11 +55,11 @@ const styles = {
     overflow: "hidden",
   }),
   toolbar: css({
-    padding: "16px",
-    borderBottom: "1px solid #e5e5e5",
+    padding: `${tokens.spacingS} ${tokens.spacingM}`,
+    borderBottom: `1px solid ${tokens.gray200}`,
     display: "flex",
     alignItems: "center",
-    gap: "16px",
+    gap: tokens.spacingM,
   }),
   searchBox: css({
     flex: 1,
@@ -62,16 +70,17 @@ const styles = {
     overflow: "auto",
   }),
   footer: css({
-    padding: "16px",
-    borderTop: "1px solid #e5e5e5",
+    padding: `${tokens.spacingS} ${tokens.spacingM}`,
+    borderTop: `1px solid ${tokens.gray200}`,
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    flexShrink: 0,
   }),
   loadMore: css({
     display: "flex",
     justifyContent: "center",
-    padding: "16px",
+    padding: tokens.spacingM,
   }),
 };
 
@@ -269,7 +278,7 @@ const Dialog = () => {
   const selectedKeys = new Set(selected.keys());
 
   return (
-    <div>
+    <div className={styles.root}>
       <div className={styles.container}>
         <div className={styles.sidebar}>
           <Text fontWeight="fontWeightMedium" marginBottom="spacingS">

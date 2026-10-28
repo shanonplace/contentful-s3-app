@@ -33,10 +33,10 @@ graph LR
 
 ### Why a function instead of a separate proxy server
 
-Earlier versions of this app required a self-hosted Node.js/Express proxy (still in
-`s3-proxy/`, see "Legacy Express proxy" below). The proxy existed for two reasons: the
-browser must never hold AWS credentials, and S3 does not answer cross-origin browser
-requests. A Contentful app function solves both without anything to host:
+Earlier versions of this app required a self-hosted Node.js/Express proxy. It existed
+for two reasons: the browser must never hold AWS credentials, and S3 does not answer
+cross-origin browser requests. A Contentful app function solves both without anything
+to host:
 
 - **Nothing to deploy or run.** The function is uploaded with the app bundle
   (`npm run upload`) and executed by Contentful. There is no server, container, DNS name,
@@ -72,7 +72,6 @@ contentful-app/                  Contentful app: frontend, function, deploy scri
   scripts/test-proxy.mts         Local harness: runs the handler against live S3
   scripts/set-parameter-definitions.mts  Defines installation parameters (Secret type)
   .env.example                   Variables for the scripts above
-s3-proxy/                        Legacy Express proxy, no longer required
 ```
 
 ## Gotchas (read before setup)
@@ -83,8 +82,12 @@ s3-proxy/                        Legacy Express proxy, no longer required
   to an app installation, so they fail in an environment where the app is not installed.
 - **Every listing costs seconds, not milliseconds.** An app action call goes browser to
   CMA to function to S3 and back, and the CMA polls for the result. Expect roughly one to
-  several seconds per folder open, page or search. The dialog caches the root folder list
-  for 5 minutes and remembers the last folder to limit round trips.
+  several seconds per folder open, page or search. The dialog fetches the folder list and
+  the files of the last-visited folder in parallel when it opens, and sub-folders only
+  when expanded. Nothing is cached between opens, so new folders appear on the next open.
+- **Empty folders show as folders but have no files.** S3 has no real folders; a folder
+  created in the S3 console is a zero-byte placeholder object. It appears in the tree,
+  and the function hides the placeholder itself from the file list.
 - **Run `npm run set-parameter-definitions -- --execute` before installing.** Without
   installation parameter definitions on the app definition, every value (including the
   AWS secret key) is stored as a plain, readable parameter. The definitions make
@@ -319,13 +322,6 @@ not installed. See `contentful-app/functions/README.md` for the dispatch and err
   the bucket.
 - **Thumbnails do not load**: the CloudFront domain is wrong or the distribution does not
   have access to the bucket. Open a `displayUrl` from the field directly to check.
-
-## Legacy Express proxy
-
-`s3-proxy/` is the previous architecture: a self-hosted Node.js server that held the AWS
-credentials and was called by the frontend with a shared API key. It is no longer used by
-the app and is kept only for reference. Its own README section lives in
-`s3-proxy/TEST_GUIDE.md`. Delete the directory once you no longer need it.
 
 ## License
 

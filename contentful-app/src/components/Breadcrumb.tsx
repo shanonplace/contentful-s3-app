@@ -1,30 +1,31 @@
 import { ChevronRightIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
+import tokens from "@contentful/f36-tokens";
 
 const styles = {
   container: css({
     display: "flex",
     alignItems: "center",
-    gap: "4px",
-    fontSize: "14px",
+    gap: tokens.spacing2Xs,
+    fontSize: tokens.fontSizeM,
     flexWrap: "wrap",
   }),
   segment: css({
     cursor: "pointer",
-    padding: "4px 8px",
-    borderRadius: "4px",
-    color: "#0066ff",
+    padding: `${tokens.spacing2Xs} ${tokens.spacingXs}`,
+    borderRadius: tokens.borderRadiusMedium,
+    color: tokens.blue600,
     "&:hover": {
-      backgroundColor: "#f0f7ff",
+      backgroundColor: tokens.blue100,
     },
   }),
   currentSegment: css({
-    padding: "4px 8px",
-    color: "#333",
-    fontWeight: 500,
+    padding: `${tokens.spacing2Xs} ${tokens.spacingXs}`,
+    color: tokens.gray900,
+    fontWeight: tokens.fontWeightMedium,
   }),
   separator: css({
-    color: "#999",
+    color: tokens.gray500,
     display: "flex",
     alignItems: "center",
   }),
@@ -36,17 +37,13 @@ interface BreadcrumbProps {
 }
 
 export function Breadcrumb({ path, onClick }: BreadcrumbProps) {
-  // Parse path into segments
-  const segments = path
-    .split("/")
-    .filter((s) => s.length > 0);
+  const segments = path.split("/").filter((s) => s.length > 0);
 
   const handleClick = (index: number) => {
     if (index === -1) {
       onClick("");
     } else {
-      const newPath = segments.slice(0, index + 1).join("/") + "/";
-      onClick(newPath);
+      onClick(segments.slice(0, index + 1).join("/") + "/");
     }
   };
 
@@ -68,10 +65,7 @@ export function Breadcrumb({ path, onClick }: BreadcrumbProps) {
               {index === segments.length - 1 ? (
                 <span className={styles.currentSegment}>{segment}</span>
               ) : (
-                <span
-                  className={styles.segment}
-                  onClick={() => handleClick(index)}
-                >
+                <span className={styles.segment} onClick={() => handleClick(index)}>
                   {segment}
                 </span>
               )}

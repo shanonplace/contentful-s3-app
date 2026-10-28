@@ -3,35 +3,36 @@ import { useSDK } from "@contentful/react-apps-toolkit";
 import { Text, Spinner } from "@contentful/f36-components";
 import { FolderOpenIcon, ChevronDownIcon, ChevronRightIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
+import tokens from "@contentful/f36-tokens";
 import type { S3Prefix } from "../types";
 import { fetchPrefixes } from "../utils";
 
 const styles = {
   tree: css({
-    fontSize: "14px",
+    fontSize: tokens.fontSizeM,
   }),
   item: css({
     display: "flex",
     alignItems: "center",
-    padding: "6px 8px",
+    padding: `6px ${tokens.spacingXs}`,
     cursor: "pointer",
-    borderRadius: "4px",
+    borderRadius: tokens.borderRadiusMedium,
     gap: "6px",
     "&:hover": {
-      backgroundColor: "#e8e8e8",
+      backgroundColor: tokens.gray200,
     },
   }),
   activeItem: css({
-    backgroundColor: "#e6f0ff",
+    backgroundColor: tokens.blue100,
     "&:hover": {
-      backgroundColor: "#d6e6ff",
+      backgroundColor: tokens.blue100,
     },
   }),
   chevron: css({
     width: "16px",
     height: "16px",
     flexShrink: 0,
-    color: "#666",
+    color: tokens.gray500,
   }),
   chevronPlaceholder: css({
     width: "16px",
@@ -39,7 +40,7 @@ const styles = {
     flexShrink: 0,
   }),
   folderIcon: css({
-    color: "#f5a623",
+    color: tokens.yellow500,
     flexShrink: 0,
   }),
   label: css({
@@ -54,13 +55,13 @@ const styles = {
   rootItem: css({
     display: "flex",
     alignItems: "center",
-    padding: "6px 8px",
+    padding: `6px ${tokens.spacingXs}`,
     cursor: "pointer",
-    borderRadius: "4px",
+    borderRadius: tokens.borderRadiusMedium,
     gap: "6px",
-    fontWeight: 500,
+    fontWeight: tokens.fontWeightMedium,
     "&:hover": {
-      backgroundColor: "#e8e8e8",
+      backgroundColor: tokens.gray200,
     },
   }),
   loading: css({
@@ -68,8 +69,8 @@ const styles = {
     marginLeft: "22px",
     display: "flex",
     alignItems: "center",
-    gap: "8px",
-    color: "#666",
+    gap: tokens.spacingXs,
+    color: tokens.gray500,
   }),
 };
 

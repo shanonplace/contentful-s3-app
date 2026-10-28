@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { Card, Text, Spinner } from "@contentful/f36-components";
 import { AssetIcon, CheckCircleIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
+import tokens from "@contentful/f36-tokens";
 import type { S3Asset } from "../types";
 import { formatFileSize, formatDate } from "../utils";
 
@@ -9,18 +10,18 @@ const styles = {
   grid: css({
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-    gap: "16px",
-    padding: "16px",
+    gap: tokens.spacingM,
+    padding: tokens.spacingM,
     alignContent: "start",
   }),
   card: css({
     cursor: "pointer",
     transition: "all 0.15s ease",
     "&:hover": {
-      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+      boxShadow: tokens.boxShadowDefault,
     },
   }),
-  // Positioning context for the checkmark, "Already added" label and tooltip.
+  // Positioning context for the checkmark, "Already on this field" label and tooltip.
   // Kept on an inner div because f36's Card styles override a className's
   // layout properties (see AssetThumbnail).
   body: css({
@@ -28,8 +29,8 @@ const styles = {
     minWidth: 0,
   }),
   selectedCard: css({
-    border: "2px solid #0066ff",
-    backgroundColor: "#f0f7ff",
+    border: `2px solid ${tokens.blue500}`,
+    backgroundColor: tokens.blue100,
   }),
   // Already on the field: visible for context, but not selectable again.
   disabledCard: css({
@@ -43,26 +44,26 @@ const styles = {
     position: "absolute",
     top: "8px",
     left: "8px",
-    fontSize: "11px",
-    padding: "2px 6px",
-    borderRadius: "4px",
-    backgroundColor: "#333",
-    color: "white",
+    fontSize: tokens.fontSizeS,
+    padding: `2px ${tokens.spacingXs}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.gray700,
+    color: tokens.colorWhite,
   }),
   checkmark: css({
     position: "absolute",
     top: "8px",
     right: "8px",
-    color: "#0066ff",
-    backgroundColor: "white",
+    color: tokens.blue500,
+    backgroundColor: tokens.colorWhite,
     borderRadius: "50%",
   }),
   thumbnail: css({
     width: "100%",
     height: "120px",
     objectFit: "cover",
-    borderRadius: "4px 4px 0 0",
-    backgroundColor: "#f5f5f5",
+    borderRadius: `${tokens.borderRadiusMedium} ${tokens.borderRadiusMedium} 0 0`,
+    backgroundColor: tokens.gray100,
   }),
   placeholder: css({
     width: "100%",
@@ -70,35 +71,35 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f5f5f5",
-    borderRadius: "4px 4px 0 0",
-    color: "#666",
+    backgroundColor: tokens.gray100,
+    borderRadius: `${tokens.borderRadiusMedium} ${tokens.borderRadiusMedium} 0 0`,
+    color: tokens.gray500,
   }),
   info: css({
-    padding: "12px",
+    padding: tokens.spacingS,
   }),
   name: css({
-    fontWeight: 500,
-    fontSize: "14px",
+    fontWeight: tokens.fontWeightMedium,
+    fontSize: tokens.fontSizeM,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     marginBottom: "4px",
   }),
   meta: css({
-    fontSize: "12px",
-    color: "#666",
+    fontSize: tokens.fontSizeS,
+    color: tokens.gray500,
   }),
   tooltip: css({
     position: "absolute",
     bottom: "100%",
     left: "50%",
     transform: "translateX(-50%)",
-    backgroundColor: "#333",
-    color: "white",
-    padding: "8px 12px",
-    borderRadius: "4px",
-    fontSize: "12px",
+    backgroundColor: tokens.gray900,
+    color: tokens.colorWhite,
+    padding: `${tokens.spacingXs} ${tokens.spacingS}`,
+    borderRadius: tokens.borderRadiusMedium,
+    fontSize: tokens.fontSizeS,
     whiteSpace: "nowrap",
     zIndex: 100,
     marginBottom: "8px",
@@ -110,7 +111,7 @@ const styles = {
       transform: "translateX(-50%)",
       borderWidth: "6px",
       borderStyle: "solid",
-      borderColor: "#333 transparent transparent transparent",
+      borderColor: `${tokens.gray900} transparent transparent transparent`,
     },
   }),
   empty: css({
@@ -118,8 +119,8 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    padding: "48px",
-    color: "#666",
+    padding: tokens.spacing3Xl,
+    color: tokens.gray500,
   }),
   loading: css({
     display: "flex",
@@ -168,7 +169,7 @@ function AssetCard({ asset, isSelected, isDisabled, onClick }: AssetCardProps) {
           <CheckCircleIcon className={styles.checkmark} size="medium" />
         )}
         {isDisabled && (
-          <span className={styles.disabledLabel}>Already added</span>
+          <span className={styles.disabledLabel}>Already on this field</span>
         )}
 
         {asset.isImage ? (
