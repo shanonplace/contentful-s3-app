@@ -6,6 +6,20 @@ Contentful app function, so there is no separate server to deploy or operate.
 
 > **Disclaimer:** This code is provided as-is for use as a reference implementation. It is not officially supported by Contentful. Use at your own discretion and modify as needed for your specific requirements.
 
+## Screenshots
+
+The field editor, showing two attached files with their CloudFront URLs. Each row has
+copy-URL, open-in-new-tab and remove controls:
+
+![JSON field editor with two S3 assets attached, each showing size, date and CloudFront URL](docs/screenshots/field-editor.png)
+
+The picker dialog, opened from "Add more assets". The left pane lists folders (S3
+prefixes), the grid shows objects in the current folder, and files already on the field
+are greyed out so they cannot be added twice. The footer shows how many more the field
+can hold:
+
+![Select S3 Assets dialog with a folder tree, search box, thumbnail grid and selection count](docs/screenshots/asset-picker.png)
+
 ## Architecture
 
 ```mermaid
