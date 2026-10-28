@@ -11,6 +11,7 @@ import {
   Box,
   Button,
   Paragraph,
+  Tooltip,
 } from "@contentful/f36-components";
 import type { AppInstallationParameters } from "../types";
 import { DEFAULT_MAX_FILES, MAX_FILES_LIMIT } from "../constants";
@@ -46,8 +47,7 @@ const ConfigScreen = () => {
       .replace(/^https?:\/\//i, "")
       .replace(/\/+$/, "");
     // Re-sending the redacted value keeps the stored secret; only a typed
-    // replacement changes it. Verify this on first install with "Test
-    // connection" after a save that did not touch the secret (see README).
+    // replacement changes it (verified 2026-10-27 against a live install).
     const awsSecretAccessKey = newSecret.trim() || savedSecret;
 
     if (!REGION_RE.test(awsRegion)) {
@@ -237,9 +237,13 @@ const ConfigScreen = () => {
       </Form>
 
       <Box marginTop="spacingM" marginBottom="spacingL">
-        <Button variant="secondary" onClick={() => void testConnection()} isDisabled={testing}>
-          {testing ? "Testing..." : "Test connection (uses last saved values)"}
-        </Button>
+        {/* Short label: f36 Button truncates long text with an ellipsis. The
+            caveat lives in the tooltip and the paragraph below instead. */}
+        <Tooltip content="Runs the deployed function with the last saved values" placement="top">
+          <Button variant="secondary" onClick={() => void testConnection()} isDisabled={testing}>
+            {testing ? "Testing..." : "Test connection"}
+          </Button>
+        </Tooltip>
         <Paragraph marginTop="spacingXs" fontColor="gray500">
           Save first. The test runs the deployed function against the saved
           credentials, not the values in this form.

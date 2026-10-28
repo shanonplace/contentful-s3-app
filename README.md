@@ -94,12 +94,10 @@ contentful-app/                  Contentful app: frontend, function, deploy scri
   AWS secret key) is stored as a plain, readable parameter. The definitions make
   `awsSecretAccessKey` a `Secret`. If the app was already installed before the
   definitions existed, re-save its configuration afterwards.
-- **Secret re-save behaviour is unverified.** The config screen receives only a redacted
-  value for the saved secret and sends that same value back when you save without
-  entering a new one, on the assumption that Contentful preserves the stored secret.
-  Verify this once per install: save the configuration without touching the secret, then
-  click "Test connection". A `SignatureDoesNotMatch` error would mean the secret was
-  overwritten; re-enter it.
+- **Saving the config screen without re-entering the secret keeps it.** The screen only
+  receives a redacted value for the saved secret and sends that same value back; Contentful
+  preserves the stored secret (verified 2026-10-27 with "Test connection" after a save
+  that did not touch the field). Type a new value only when rotating the key.
 - **The access key ID, region, bucket and CloudFront domain are readable by anyone with
   access to the space.** Only the secret is hidden. Use a dedicated IAM user whose only
   permission is `s3:ListBucket` on this bucket (policy below).
@@ -317,8 +315,7 @@ not installed. See `contentful-app/functions/README.md` for the dispatch and err
   value filled in.
 - **"Bucket ... is not in region ..."**: S3 answered with a redirect; fix the region.
 - **"S3 rejected the request (SignatureDoesNotMatch / InvalidAccessKeyId)"**: wrong key
-  or secret. If this appears right after re-saving the configuration without changing
-  the secret, see the Secret re-save gotcha above.
+  or secret. Re-enter both on the configuration screen and save.
 - **"S3 rejected the request (AccessDenied)"**: the IAM user lacks `s3:ListBucket` on
   the bucket.
 - **Thumbnails do not load**: the CloudFront domain is wrong or the distribution does not
