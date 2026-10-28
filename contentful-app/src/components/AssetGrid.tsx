@@ -25,6 +25,24 @@ const styles = {
     border: "2px solid #0066ff",
     backgroundColor: "#f0f7ff",
   }),
+  // Already on the field: visible for context, but not selectable again.
+  disabledCard: css({
+    cursor: "default",
+    opacity: 0.55,
+    "&:hover": {
+      boxShadow: "none",
+    },
+  }),
+  disabledLabel: css({
+    position: "absolute",
+    top: "8px",
+    left: "8px",
+    fontSize: "11px",
+    padding: "2px 6px",
+    borderRadius: "4px",
+    backgroundColor: "#333",
+    color: "white",
+  }),
   checkmark: css({
     position: "absolute",
     top: "8px",
@@ -108,10 +126,11 @@ const styles = {
 interface AssetCardProps {
   asset: S3Asset;
   isSelected: boolean;
+  isDisabled: boolean;
   onClick: () => void;
 }
 
-function AssetCard({ asset, isSelected, onClick }: AssetCardProps) {
+function AssetCard({ asset, isSelected, isDisabled, onClick }: AssetCardProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -130,14 +149,17 @@ function AssetCard({ asset, isSelected, onClick }: AssetCardProps) {
 
   return (
     <Card
-      className={`${styles.card} ${isSelected ? styles.selectedCard : ""}`}
-      onClick={onClick}
+      className={`${styles.card} ${isSelected ? styles.selectedCard : ""} ${
+        isDisabled ? styles.disabledCard : ""
+      }`}
+      onClick={isDisabled ? undefined : onClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {isSelected && (
         <CheckCircleIcon className={styles.checkmark} size="medium" />
       )}
+      {isDisabled && <span className={styles.disabledLabel}>Already added</span>}
 
       {asset.isImage ? (
         <img
@@ -185,16 +207,20 @@ function AssetCard({ asset, isSelected, onClick }: AssetCardProps) {
 
 interface AssetGridProps {
   assets: S3Asset[];
-  selectedAssets: Set<string>;
+  selectedKeys: Set<string>;
+  disabledKeys: Set<string>;
   onAssetClick: (asset: S3Asset) => void;
   loading?: boolean;
+  emptyMessage?: string;
 }
 
 export function AssetGrid({
   assets,
-  selectedAssets,
+  selectedKeys,
+  disabledKeys,
   onAssetClick,
   loading,
+  emptyMessage = "No files in this folder",
 }: AssetGridProps) {
   if (loading) {
     return (
@@ -208,7 +234,7 @@ export function AssetGrid({
     return (
       <div className={styles.empty}>
         <AssetIcon size="large" />
-        <Text marginTop="spacingM">No files in this folder</Text>
+        <Text marginTop="spacingM">{emptyMessage}</Text>
       </div>
     );
   }
@@ -219,7 +245,8 @@ export function AssetGrid({
         <AssetCard
           key={asset.key}
           asset={asset}
-          isSelected={selectedAssets.has(asset.key)}
+          isSelected={selectedKeys.has(asset.key)}
+          isDisabled={disabledKeys.has(asset.key)}
           onClick={() => onAssetClick(asset)}
         />
       ))}

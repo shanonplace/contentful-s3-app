@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DialogAppSDK } from "@contentful/app-sdk";
 import { useSDK } from "@contentful/react-apps-toolkit";
 import {
@@ -12,18 +12,13 @@ import {
 } from "@contentful/f36-components";
 import { SearchIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
-import type {
-  AppInstallationParameters,
-  DialogInvocationParameters,
-  S3Asset,
-  S3Prefix,
-} from "../types";
+import type { DialogInvocationParameters, S3Asset, S3Prefix } from "../types";
 import {
   fetchPrefixes,
   fetchObjects,
   searchObjects,
-  getProxyUrl,
-  getApiKey,
+  sessionGet,
+  sessionSet,
 } from "../utils";
 import {
   CACHE_DURATION,
@@ -90,187 +85,203 @@ interface CachedPrefixes {
   prefixes: S3Prefix[];
 }
 
+function readPrefixCache(): S3Prefix[] | null {
+  const cached = sessionGet(PREFIX_CACHE_KEY);
+  if (!cached) return null;
+  try {
+    const parsed: CachedPrefixes = JSON.parse(cached);
+    if (
+      Array.isArray(parsed.prefixes) &&
+      Date.now() - parsed.timestamp < CACHE_DURATION
+    ) {
+      return parsed.prefixes;
+    }
+  } catch {
+    // Corrupt cache entry: fall through and refetch.
+  }
+  return null;
+}
+
 const Dialog = () => {
   const sdk = useSDK<DialogAppSDK>();
 
-  const invocationParams = sdk.parameters.invocation as unknown as DialogInvocationParameters;
-  const installationParams = sdk.parameters.installation as unknown as AppInstallationParameters;
+  const invocationParams = sdk.parameters
+    .invocation as unknown as DialogInvocationParameters;
 
-  const { maxFiles } = invocationParams;
-  const proxyUrl = getProxyUrl(installationParams);
-  const apiKey = getApiKey(installationParams);
+  // maxFiles here is the number of slots left on the field, not the
+  // installation-wide limit. Field computes it before opening the dialog.
+  const { maxFiles, currentAssets } = invocationParams;
 
-  // State
+  // Assets already on the field are shown but cannot be selected again.
+  const existingKeys = useMemo(
+    () => new Set((currentAssets ?? []).map((a) => a.key)),
+    [currentAssets]
+  );
+
   const [prefixes, setPrefixes] = useState<S3Prefix[]>([]);
   const [currentPrefix, setCurrentPrefix] = useState<string>("");
   const [objects, setObjects] = useState<S3Asset[]>([]);
-  const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
+  // Keyed by S3 key, holding the full asset so a selection made in one folder
+  // survives navigating to another folder before confirming.
+  const [selected, setSelected] = useState<Map<string, S3Asset>>(new Map());
   const [loading, setLoading] = useState(true);
   const [loadingObjects, setLoadingObjects] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [continuationToken, setContinuationToken] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
 
-  // Load prefixes with caching
+  // Every listing is an app action call (browser to CMA to function to S3 and
+  // back), which costs seconds rather than milliseconds. The folder cache and
+  // the stale-request guard below exist to keep that from compounding.
+  //
+  // Refs rather than state: loadObjects must keep a stable identity, or the
+  // mount effect that depends on it would re-run after every page load.
+  const continuationTokenRef = useRef<string | null>(null);
+  // Incremented per request so a slow response for a folder the user has
+  // already navigated away from cannot overwrite the current listing.
+  const requestIdRef = useRef(0);
+
   const loadPrefixes = useCallback(async () => {
     try {
-      // Check cache
-      const cached = sessionStorage.getItem(PREFIX_CACHE_KEY);
+      const cached = readPrefixCache();
       if (cached) {
-        const parsed: CachedPrefixes = JSON.parse(cached);
-        if (Date.now() - parsed.timestamp < CACHE_DURATION) {
-          setPrefixes(parsed.prefixes);
-          setLoading(false);
-          return;
-        }
+        setPrefixes(cached);
+        return;
       }
 
-      const response = await fetchPrefixes(proxyUrl, apiKey, "");
+      const response = await fetchPrefixes(sdk, "");
       setPrefixes(response.prefixes);
-
-      // Cache the results
-      sessionStorage.setItem(
+      sessionSet(
         PREFIX_CACHE_KEY,
         JSON.stringify({
           timestamp: Date.now(),
           prefixes: response.prefixes,
-        })
+        } satisfies CachedPrefixes)
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load prefixes");
+      setError(err instanceof Error ? err.message : "Failed to load folders");
     } finally {
       setLoading(false);
     }
-  }, [proxyUrl, apiKey]);
+  }, [sdk]);
 
-  // Load objects for a prefix
   const loadObjects = useCallback(
     async (prefix: string, append = false) => {
+      const requestId = ++requestIdRef.current;
       setLoadingObjects(true);
       setError(null);
       setIsSearching(false);
 
       try {
         const response = await fetchObjects(
-          proxyUrl,
-          apiKey,
+          sdk,
           prefix,
           DEFAULT_PAGE_SIZE,
-          append ? continuationToken : null
+          append ? continuationTokenRef.current : null
         );
+        if (requestId !== requestIdRef.current) return;
 
-        if (append) {
-          setObjects((prev) => [...prev, ...response.objects]);
-        } else {
-          setObjects(response.objects);
-        }
-
-        setContinuationToken(response.nextContinuationToken);
+        setObjects((prev) =>
+          append ? [...prev, ...response.objects] : response.objects
+        );
+        continuationTokenRef.current = response.nextContinuationToken;
         setHasMore(response.isTruncated);
-
-        // Save last visited prefix
-        sessionStorage.setItem(LAST_PREFIX_KEY, prefix);
+        sessionSet(LAST_PREFIX_KEY, prefix);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load objects");
+        if (requestId !== requestIdRef.current) return;
+        setError(err instanceof Error ? err.message : "Failed to load files");
       } finally {
-        setLoadingObjects(false);
+        if (requestId === requestIdRef.current) setLoadingObjects(false);
       }
     },
-    [proxyUrl, apiKey, continuationToken]
+    [sdk]
   );
 
-  // Search objects
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!query) {
+      continuationTokenRef.current = null;
       loadObjects(currentPrefix);
       return;
     }
 
+    const requestId = ++requestIdRef.current;
     setLoadingObjects(true);
     setError(null);
     setIsSearching(true);
 
     try {
       const response = await searchObjects(
-        proxyUrl,
-        apiKey,
-        searchQuery,
+        sdk,
+        query,
         currentPrefix,
         DEFAULT_PAGE_SIZE
       );
+      if (requestId !== requestIdRef.current) return;
 
       setObjects(response.objects);
+      // Search results are not paginated by the proxy; hasMore only signals
+      // that the query should be narrowed.
       setHasMore(response.hasMore);
-      setContinuationToken(null);
+      continuationTokenRef.current = null;
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
-      setLoadingObjects(false);
+      if (requestId === requestIdRef.current) setLoadingObjects(false);
     }
-  }, [proxyUrl, apiKey, searchQuery, currentPrefix, loadObjects]);
+  }, [sdk, searchQuery, currentPrefix, loadObjects]);
 
-  // Handle folder click
-  const handlePrefixClick = useCallback(
-    (prefix: S3Prefix) => {
-      setCurrentPrefix(prefix.path);
-      setSearchQuery("");
-      setContinuationToken(null);
-      loadObjects(prefix.path);
-    },
-    [loadObjects]
-  );
-
-  // Handle breadcrumb navigation
-  const handleBreadcrumbClick = useCallback(
+  // Shared by the folder tree and the breadcrumb.
+  const navigateTo = useCallback(
     (path: string) => {
       setCurrentPrefix(path);
       setSearchQuery("");
-      setContinuationToken(null);
+      continuationTokenRef.current = null;
       loadObjects(path);
     },
     [loadObjects]
   );
 
-  // Handle asset selection
+  const handlePrefixClick = useCallback(
+    (prefix: S3Prefix) => navigateTo(prefix.path),
+    [navigateTo]
+  );
+
   const handleAssetClick = useCallback(
     (asset: S3Asset) => {
-      setSelectedAssets((prev) => {
-        const next = new Set(prev);
+      if (existingKeys.has(asset.key)) return;
+      setSelected((prev) => {
+        const next = new Map(prev);
         if (next.has(asset.key)) {
           next.delete(asset.key);
         } else if (next.size < maxFiles) {
-          next.add(asset.key);
+          next.set(asset.key, asset);
         }
         return next;
       });
     },
-    [maxFiles]
+    [maxFiles, existingKeys]
   );
 
-  // Handle selection confirmation
   const handleSelect = useCallback(() => {
-    const selected = objects.filter((obj) => selectedAssets.has(obj.key));
-    sdk.close(selected);
-  }, [objects, selectedAssets, sdk]);
+    sdk.close(Array.from(selected.values()));
+  }, [selected, sdk]);
 
-  // Handle cancel
   const handleCancel = useCallback(() => {
     sdk.close(null);
   }, [sdk]);
 
-  // Initial load
+  // Initial load: folder tree plus the last folder the user was browsing.
+  // Both callbacks depend only on the sdk, so this effect runs once per mount.
   useEffect(() => {
     loadPrefixes();
-
-    // Restore last prefix
-    const lastPrefix = sessionStorage.getItem(LAST_PREFIX_KEY) || "";
+    const lastPrefix = sessionGet(LAST_PREFIX_KEY) || "";
     setCurrentPrefix(lastPrefix);
     loadObjects(lastPrefix);
   }, [loadPrefixes, loadObjects]);
 
-  // Handle search on Enter
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       handleSearch();
@@ -289,10 +300,11 @@ const Dialog = () => {
     );
   }
 
+  const selectedKeys = new Set(selected.keys());
+
   return (
     <div>
       <div className={styles.container}>
-        {/* Sidebar with folder tree */}
         <div className={styles.sidebar}>
           <Text fontWeight="fontWeightMedium" marginBottom="spacingS">
             Folders
@@ -301,16 +313,12 @@ const Dialog = () => {
             prefixes={prefixes}
             selectedPath={currentPrefix}
             onPrefixClick={handlePrefixClick}
-            proxyUrl={proxyUrl}
-            apiKey={apiKey}
           />
         </div>
 
-        {/* Main content area */}
         <div className={styles.main}>
-          {/* Toolbar with search */}
           <div className={styles.toolbar}>
-            <Breadcrumb path={currentPrefix} onClick={handleBreadcrumbClick} />
+            <Breadcrumb path={currentPrefix} onClick={navigateTo} />
             <div className={styles.searchBox}>
               <TextInput
                 value={searchQuery}
@@ -325,7 +333,6 @@ const Dialog = () => {
             </Button>
           </div>
 
-          {/* Content area */}
           <div className={styles.content}>
             {error && (
               <Box padding="spacingM">
@@ -333,22 +340,29 @@ const Dialog = () => {
               </Box>
             )}
 
-            {isSearching && objects.length > 0 && (
+            {isSearching && !loadingObjects && (
               <Box padding="spacingS" paddingLeft="spacingM">
                 <Text fontColor="gray500">
-                  Search results for "{searchQuery}"
+                  {objects.length === 0
+                    ? `No files matching "${searchQuery.trim()}"`
+                    : `Search results for "${searchQuery.trim()}"`}
+                  {currentPrefix ? ` in ${currentPrefix}` : ""}
                 </Text>
               </Box>
             )}
 
             <AssetGrid
               assets={objects}
-              selectedAssets={selectedAssets}
+              selectedKeys={selectedKeys}
+              disabledKeys={existingKeys}
               onAssetClick={handleAssetClick}
               loading={loadingObjects}
+              emptyMessage={
+                isSearching ? "Try a different search term" : "No files in this folder"
+              }
             />
 
-            {hasMore && !loadingObjects && (
+            {hasMore && !loadingObjects && !isSearching && (
               <div className={styles.loadMore}>
                 <Button
                   size="small"
@@ -359,14 +373,25 @@ const Dialog = () => {
                 </Button>
               </div>
             )}
+
+            {hasMore && !loadingObjects && isSearching && (
+              <Box padding="spacingM">
+                <Note variant="neutral">
+                  Showing the first {objects.length} matches. Narrow the search
+                  or browse to a folder to see more.
+                </Note>
+              </Box>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Footer with actions */}
       <div className={styles.footer}>
         <Text fontColor="gray500">
-          {selectedAssets.size} of {maxFiles} assets selected
+          {selected.size} of {maxFiles} selected
+          {existingKeys.size > 0
+            ? ` (${existingKeys.size} already on the field)`
+            : ""}
         </Text>
         <Flex gap="spacingM">
           <Button variant="secondary" onClick={handleCancel}>
@@ -375,9 +400,9 @@ const Dialog = () => {
           <Button
             variant="primary"
             onClick={handleSelect}
-            isDisabled={selectedAssets.size === 0}
+            isDisabled={selected.size === 0}
           >
-            Select {selectedAssets.size > 0 ? `(${selectedAssets.size})` : ""}
+            Select {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </Flex>
       </div>

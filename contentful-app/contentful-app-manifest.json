@@ -1,0 +1,68 @@
+{
+  "functions": [
+    {
+      "id": "s3Proxy",
+      "name": "S3 listing proxy",
+      "description": "Lists objects and folders in the configured S3 bucket with AWS credentials held in installation parameters. Replaces a self-hosted proxy server. Read-only: ListObjectsV2 only.",
+      "path": "functions/s3Proxy.js",
+      "entryFile": "functions/s3Proxy.ts",
+      "allowNetworks": [
+        "*.amazonaws.com"
+      ],
+      "accepts": [
+        "appaction.call"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "s3Api",
+      "name": "S3 API",
+      "description": "Read-only S3 listing used by the asset picker field editor.",
+      "type": "function-invocation",
+      "functionId": "s3Proxy",
+      "category": "Custom",
+      "parametersSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "listPrefixes",
+              "listObjects",
+              "search",
+              "testConnection"
+            ],
+            "description": "Operation to perform"
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "S3 key prefix (folder). Empty for the bucket root."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Objects per page for listObjects and search. Default 25."
+          },
+          "continuationToken": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "nextContinuationToken from a previous listObjects result"
+          },
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Case-insensitive filename substring for search"
+          }
+        }
+      }
+    }
+  ]
+}

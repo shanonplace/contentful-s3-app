@@ -1,125 +1,95 @@
-import type {
-  AppInstallationParameters,
-  PrefixesResponse,
-  ObjectsResponse,
-  SearchResponse,
-} from "./types";
+import type { BaseAppSDK } from "@contentful/app-sdk";
+import type { AppInstallationParameters } from "./types";
+import {
+  callS3,
+  type ObjectsResult,
+  type PrefixesResult,
+  type SearchResult,
+} from "./lib/s3Proxy";
 
-export function getProxyUrl(parameters: AppInstallationParameters): string {
-  if (!parameters.proxyUrl) {
-    throw new Error("S3 Proxy URL is not configured");
-  }
-  return parameters.proxyUrl;
+// The config screen is responsible for completeness; Field only needs to know
+// whether to render the picker or a "not configured" note. The secret key is
+// redacted by the SDK but still present when saved, so a truthy check works.
+export function isConfigured(parameters: AppInstallationParameters): boolean {
+  return Boolean(
+    parameters.awsRegion &&
+      parameters.awsAccessKeyId &&
+      parameters.awsSecretAccessKey &&
+      parameters.s3Bucket &&
+      parameters.cloudfrontDomain
+  );
 }
 
-export function getApiKey(parameters: AppInstallationParameters): string {
-  if (!parameters.apiKey) {
-    throw new Error("API Key is not configured");
-  }
-  return parameters.apiKey;
-}
-
-export async function fetchPrefixes(
-  proxyUrl: string,
-  apiKey: string,
-  prefix: string = ""
-): Promise<PrefixesResponse> {
-  const url = `${proxyUrl}/api/s3/prefixes?prefix=${encodeURIComponent(prefix)}`;
-  const response = await fetch(url, {
-    headers: {
-      "X-API-Key": apiKey,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `Failed to fetch prefixes: ${response.statusText}`);
-  }
-
-  return response.json();
+// Thin wrappers that turn the function's ok:false results into thrown Errors
+// so the Dialog's try/catch handles both transport and application failures
+// in one place.
+export async function fetchPrefixes(sdk: BaseAppSDK, prefix: string = ""): Promise<PrefixesResult> {
+  const result = await callS3<PrefixesResult>(sdk, { action: "listPrefixes", prefix });
+  if (!result.ok) throw new Error(result.error);
+  return result;
 }
 
 export async function fetchObjects(
-  proxyUrl: string,
-  apiKey: string,
+  sdk: BaseAppSDK,
   prefix: string = "",
   pageSize: number = 25,
   continuationToken: string | null = null
-): Promise<ObjectsResponse> {
-  let url = `${proxyUrl}/api/s3/objects?prefix=${encodeURIComponent(prefix)}&pageSize=${pageSize}`;
-  if (continuationToken) {
-    url += `&continuationToken=${encodeURIComponent(continuationToken)}`;
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      "X-API-Key": apiKey,
-    },
+): Promise<ObjectsResult> {
+  const result = await callS3<ObjectsResult>(sdk, {
+    action: "listObjects",
+    prefix,
+    pageSize,
+    continuationToken: continuationToken ?? undefined,
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `Failed to fetch objects: ${response.statusText}`);
-  }
-
-  return response.json();
+  if (!result.ok) throw new Error(result.error);
+  return result;
 }
 
 export async function searchObjects(
-  proxyUrl: string,
-  apiKey: string,
+  sdk: BaseAppSDK,
   query: string,
   prefix: string = "",
   pageSize: number = 25
-): Promise<SearchResponse> {
-  const url = `${proxyUrl}/api/s3/search?q=${encodeURIComponent(query)}&prefix=${encodeURIComponent(prefix)}&pageSize=${pageSize}`;
+): Promise<SearchResult> {
+  const result = await callS3<SearchResult>(sdk, { action: "search", q: query, prefix, pageSize });
+  if (!result.ok) throw new Error(result.error);
+  return result;
+}
 
-  const response = await fetch(url, {
-    headers: {
-      "X-API-Key": apiKey,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `Failed to search objects: ${response.statusText}`);
+// sessionStorage can throw inside a third-party iframe when storage access is
+// blocked. Caching is a convenience, so treat failures as a cache miss.
+export function sessionGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
   }
+}
 
-  return response.json();
+export function sessionSet(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore: nothing to do without storage.
+  }
 }
 
 export function formatFileSize(bytes: number | null): string {
-  if (bytes === null || bytes === 0) return "0 B";
+  if (bytes === null || bytes <= 0) return "0 B";
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  // Clamp so anything above the largest unit still gets a label.
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
 export function formatDate(dateString: string | null): string {
   if (!dateString) return "N/A";
-  try {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return "N/A";
-  }
-}
-
-export function getFolderNameFromPath(path: string): string {
-  if (!path) return "Root";
-  const cleanPath = path.endsWith("/") ? path.slice(0, -1) : path;
-  const parts = cleanPath.split("/");
-  return parts[parts.length - 1] || "Root";
-}
-
-export function getParentPath(path: string): string {
-  if (!path) return "";
-  const cleanPath = path.endsWith("/") ? path.slice(0, -1) : path;
-  const parts = cleanPath.split("/");
-  parts.pop();
-  return parts.length > 0 ? parts.join("/") + "/" : "";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }

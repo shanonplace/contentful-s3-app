@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useSDK } from "@contentful/react-apps-toolkit";
 import { Text, Spinner } from "@contentful/f36-components";
 import { FolderOpenIcon, ChevronDownIcon, ChevronRightIcon } from "@contentful/f36-icons";
 import { css } from "@emotion/css";
@@ -76,8 +77,6 @@ interface FolderTreeItemProps {
   prefix: S3Prefix;
   selectedPath: string;
   onPrefixClick: (prefix: S3Prefix) => void;
-  proxyUrl: string;
-  apiKey: string;
   level?: number;
 }
 
@@ -85,14 +84,14 @@ function FolderTreeItem({
   prefix,
   selectedPath,
   onPrefixClick,
-  proxyUrl,
-  apiKey,
   level = 0,
 }: FolderTreeItemProps) {
+  const sdk = useSDK();
   const [isExpanded, setIsExpanded] = useState(false);
   const [children, setChildren] = useState<S3Prefix[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const isActive = selectedPath === prefix.path;
   const hasChildren = prefix.hasChildren;
@@ -101,16 +100,19 @@ function FolderTreeItem({
     if (loaded || loading) return;
 
     setLoading(true);
+    setLoadError(null);
     try {
-      const response = await fetchPrefixes(proxyUrl, apiKey, prefix.path);
+      const response = await fetchPrefixes(sdk, prefix.path);
       setChildren(response.prefixes);
       setLoaded(true);
     } catch (error) {
-      console.error("Failed to load subfolders:", error);
+      // Shown inline under the folder; a console-only error left the tree
+      // silently empty and the user with no way to tell what happened.
+      setLoadError(error instanceof Error ? error.message : "Failed to load subfolders");
     } finally {
       setLoading(false);
     }
-  }, [proxyUrl, apiKey, prefix.path, loaded, loading]);
+  }, [sdk, prefix.path, loaded, loading]);
 
   const handleClick = () => {
     onPrefixClick(prefix);
@@ -159,11 +161,18 @@ function FolderTreeItem({
               prefix={child}
               selectedPath={selectedPath}
               onPrefixClick={onPrefixClick}
-              proxyUrl={proxyUrl}
-              apiKey={apiKey}
               level={level + 1}
             />
           ))}
+          {loadError && (
+            <Text
+              fontSize="fontSizeS"
+              fontColor="red600"
+              style={{ paddingLeft: "22px" }}
+            >
+              {loadError}
+            </Text>
+          )}
           {loaded && children.length === 0 && (
             <Text
               fontSize="fontSizeS"
@@ -183,16 +192,12 @@ interface FolderTreeProps {
   prefixes: S3Prefix[];
   selectedPath: string;
   onPrefixClick: (prefix: S3Prefix) => void;
-  proxyUrl: string;
-  apiKey: string;
 }
 
 export function FolderTree({
   prefixes,
   selectedPath,
   onPrefixClick,
-  proxyUrl,
-  apiKey,
 }: FolderTreeProps) {
   const handleRootClick = () => {
     onPrefixClick({ name: "Root", path: "", hasChildren: true });
@@ -215,8 +220,6 @@ export function FolderTree({
             prefix={prefix}
             selectedPath={selectedPath}
             onPrefixClick={onPrefixClick}
-            proxyUrl={proxyUrl}
-            apiKey={apiKey}
           />
         ))}
       </div>

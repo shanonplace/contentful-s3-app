@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && npm run build:functions",
+    "build:functions": "contentful-app-scripts build-functions --ci",
+    "typecheck": "tsc --noEmit && tsc -p functions --noEmit",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "test:proxy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/test-proxy.mts",
+    "create-app-definition": "contentful-app-scripts create-app-definition",
+    "upload": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/run-app-scripts.mts upload",
+    "upsert-actions": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/run-app-scripts.mts upsert-actions",
+    "set-parameter-definitions": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/set-parameter-definitions.mts"
   },
   "dependencies": {
     "@contentful/app-sdk": "^4.29.1",
@@ -16,15 +22,18 @@
     "@contentful/f36-tokens": "^4.2.0",
     "@contentful/react-apps-toolkit": "^1.2.16",
     "@emotion/css": "^11.13.5",
-    "contentful-management": "^10.46.4",
+    "aws4fetch": "^1.0.20",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@contentful/app-scripts": "^4.1.16",
+    "@contentful/node-apps-toolkit": "^4.1.0",
+    "@tsconfig/recommended": "^1.0.8",
+    "@types/node": "^22.20.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.39.1",
     "typescript": "~5.7.2",
     "vite": "^6.2.2"
   }
