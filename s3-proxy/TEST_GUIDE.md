@@ -13,11 +13,7 @@ cd s3-proxy
 npm start
 ```
 
-You should see:
-
-```
-🚀 S3 Proxy Server running at: http://localhost:5284
-```
+You should see a log line containing `S3 proxy server started` with the port.
 
 ## Quick Tests
 
@@ -65,27 +61,35 @@ Expected: JSON with files matching "test" in their name
 
 ## Using the Test Script
 
-Make the script executable and run it:
+`jq` is required. `API_KEY` is required and must match the running server's
+`.env`. `BASE_URL` defaults to `http://localhost:5284`.
 
 ```bash
-chmod +x test-endpoints.sh
 API_KEY=your-actual-api-key ./test-endpoints.sh
+API_KEY=your-actual-api-key BASE_URL=http://localhost:5999 ./test-endpoints.sh
 ```
 
-Or export the API_KEY first:
+The script runs nine checks and compares each HTTP status with the expected
+one. It exits non-zero if any check fails.
 
-```bash
-export API_KEY=your-actual-api-key
-./test-endpoints.sh
-```
+| Check                 | Expected status |
+| --------------------- | --------------- |
+| Health check          | 200             |
+| List root prefixes    | 200             |
+| List root objects     | 200             |
+| Search for "test"     | 200             |
+| Wrong API key         | 401             |
+| Missing API key       | 401             |
+| Invalid pageSize      | 400             |
+| Missing search query  | 400             |
+| Repeated prefix param | 400             |
 
 ## Common Issues
 
 ### Server won't start
 
-- Check all `.env` values are filled in
-- Verify AWS credentials are correct
-- Check port 5284 isn't already in use
+- The error message names the missing `.env` variable
+- Check the port in `.env` isn't already in use
 
 ### 500 errors on S3 endpoints
 
@@ -101,10 +105,11 @@ export API_KEY=your-actual-api-key
 
 ## What Success Looks Like
 
-✅ Health check returns `{"status":"ok"}`  
-✅ Wrong API key returns 401 error  
-✅ Valid API key returns S3 data (folders, files, or empty arrays if bucket is empty)  
-✅ CloudFront URLs are correctly formatted in the response  
-✅ Search returns matching results
+- Health check returns `{"status":"ok"}`
+- Wrong or missing API key returns 401
+- Valid API key returns S3 data (folders, files, or empty arrays if bucket is empty)
+- `displayUrl` values point at the CloudFront domain
+- Invalid input returns 400 with a `ValidationError`
+- The script prints `All checks passed`
 
 Once all tests pass, you're ready to integrate with the Contentful app!

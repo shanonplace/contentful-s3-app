@@ -7,7 +7,6 @@ import {
 
 const DEFAULTS = {
   PAGE_SIZE: 25,
-  MAX_KEYS: 1000,
 };
 
 const LIMITS = {
@@ -17,135 +16,110 @@ const LIMITS = {
   MAX_SEARCH_QUERY_LENGTH: 200,
 };
 
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+    this.statusCode = 400;
+  }
+}
+
+// Express parses repeated query params (?prefix=a&prefix=b) into arrays and
+// bracketed ones into objects. Only plain strings are valid here, and letting
+// anything else through would reach the AWS SDK with a confusing error.
+function requireString(value, name, { required = false, maxLength } = {}) {
+  if (value === undefined) {
+    if (required) throw new ValidationError(`${name} is required`);
+    return "";
+  }
+  if (typeof value !== "string") {
+    throw new ValidationError(`${name} must be a single string value`);
+  }
+  if (required && value.length === 0) {
+    throw new ValidationError(`${name} is required`);
+  }
+  if (maxLength !== undefined && value.length > maxLength) {
+    throw new ValidationError(
+      `${name} exceeds maximum length of ${maxLength}`,
+    );
+  }
+  return value;
+}
+
+function parsePrefix(value) {
+  const prefix = requireString(value, "prefix", {
+    maxLength: LIMITS.MAX_PREFIX_LENGTH,
+  });
+  // ".." has no traversal meaning in S3 keys, but rejecting it keeps the
+  // proxy from being used to probe unexpected key shapes.
+  if (prefix.includes("..")) {
+    throw new ValidationError("Invalid prefix format");
+  }
+  return prefix;
+}
+
+function parsePageSize(value) {
+  if (value === undefined) return DEFAULTS.PAGE_SIZE;
+  const str = requireString(value, "pageSize");
+  // Reject "25abc" style input that parseInt would silently accept.
+  const pageSize = /^\d+$/.test(str) ? Number(str) : NaN;
+  if (
+    Number.isNaN(pageSize) ||
+    pageSize < LIMITS.MIN_PAGE_SIZE ||
+    pageSize > LIMITS.MAX_PAGE_SIZE
+  ) {
+    throw new ValidationError(
+      `pageSize must be between ${LIMITS.MIN_PAGE_SIZE} and ${LIMITS.MAX_PAGE_SIZE}`,
+    );
+  }
+  return pageSize;
+}
+
+// Wrap an async handler so thrown errors reach the central error handler in
+// server.js, which decides what detail is safe to return per environment.
+const asyncHandler = (fn) => (req, res, next) => {
+  fn(req, res, next).catch(next);
+};
+
 export function getRouter() {
   const router = express.Router();
 
-  // GET /prefixes - List "folders" (common prefixes) at a given path
-  router.get("/prefixes", async (req, res) => {
-    try {
-      const { prefix = "" } = req.query;
+  // GET /prefixes - list "folders" (common prefixes) directly under a path
+  router.get(
+    "/prefixes",
+    asyncHandler(async (req, res) => {
+      const prefix = parsePrefix(req.query.prefix);
+      res.json(await listPrefixes(prefix));
+    }),
+  );
 
-      if (prefix.length > LIMITS.MAX_PREFIX_LENGTH) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `prefix exceeds maximum length of ${LIMITS.MAX_PREFIX_LENGTH}`,
-        });
-      }
-
-      if (prefix.includes("..")) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: "Invalid prefix format",
-        });
-      }
-
-      const result = await listPrefixes(prefix);
-      res.json(result);
-    } catch (error) {
-      req.log.error({ error }, "Failed to list prefixes");
-      res.status(error.statusCode || 500).json({
-        error: error.name || "S3Error",
-        message: error.message,
-      });
-    }
-  });
-
-  // GET /objects - List objects in a "folder" (prefix) with pagination
-  router.get("/objects", async (req, res) => {
-    try {
-      const { prefix = "", pageSize, continuationToken } = req.query;
-
-      if (prefix.length > LIMITS.MAX_PREFIX_LENGTH) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `prefix exceeds maximum length of ${LIMITS.MAX_PREFIX_LENGTH}`,
-        });
-      }
-
-      if (prefix.includes("..")) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: "Invalid prefix format",
-        });
-      }
-
-      const pageSizeNum = pageSize ? parseInt(pageSize) : DEFAULTS.PAGE_SIZE;
-
-      if (
-        isNaN(pageSizeNum) ||
-        pageSizeNum < LIMITS.MIN_PAGE_SIZE ||
-        pageSizeNum > LIMITS.MAX_PAGE_SIZE
-      ) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `pageSize must be between ${LIMITS.MIN_PAGE_SIZE} and ${LIMITS.MAX_PAGE_SIZE}`,
-        });
-      }
-
-      const result = await listObjects(
-        prefix,
-        pageSizeNum,
-        continuationToken || null
+  // GET /objects - list files directly under a path, paginated
+  router.get(
+    "/objects",
+    asyncHandler(async (req, res) => {
+      const prefix = parsePrefix(req.query.prefix);
+      const pageSize = parsePageSize(req.query.pageSize);
+      const continuationToken = requireString(
+        req.query.continuationToken,
+        "continuationToken",
       );
-      res.json(result);
-    } catch (error) {
-      req.log.error({ error }, "Failed to list objects");
-      res.status(error.statusCode || 500).json({
-        error: error.name || "S3Error",
-        message: error.message,
+      res.json(await listObjects(prefix, pageSize, continuationToken || null));
+    }),
+  );
+
+  // GET /search - filename substring search under a path (recursive)
+  router.get(
+    "/search",
+    asyncHandler(async (req, res) => {
+      const q = requireString(req.query.q, "q (search query)", {
+        required: true,
+        maxLength: LIMITS.MAX_SEARCH_QUERY_LENGTH,
       });
-    }
-  });
-
-  // GET /search - Search objects by filename
-  router.get("/search", async (req, res) => {
-    try {
-      const { q, prefix = "", pageSize } = req.query;
-
-      if (!q) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: "q (search query) is required",
-        });
-      }
-
-      if (q.length > LIMITS.MAX_SEARCH_QUERY_LENGTH) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `Search query exceeds maximum length of ${LIMITS.MAX_SEARCH_QUERY_LENGTH}`,
-        });
-      }
-
-      if (prefix.length > LIMITS.MAX_PREFIX_LENGTH) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `prefix exceeds maximum length of ${LIMITS.MAX_PREFIX_LENGTH}`,
-        });
-      }
-
-      const pageSizeNum = pageSize ? parseInt(pageSize) : DEFAULTS.PAGE_SIZE;
-
-      if (
-        isNaN(pageSizeNum) ||
-        pageSizeNum < LIMITS.MIN_PAGE_SIZE ||
-        pageSizeNum > LIMITS.MAX_PAGE_SIZE
-      ) {
-        return res.status(400).json({
-          error: "ValidationError",
-          message: `pageSize must be between ${LIMITS.MIN_PAGE_SIZE} and ${LIMITS.MAX_PAGE_SIZE}`,
-        });
-      }
-
-      const result = await searchObjects(q, prefix, pageSizeNum);
-      res.json(result);
-    } catch (error) {
-      req.log.error({ error }, "Failed to search objects");
-      res.status(error.statusCode || 500).json({
-        error: error.name || "S3Error",
-        message: error.message,
-      });
-    }
-  });
+      const prefix = parsePrefix(req.query.prefix);
+      const pageSize = parsePageSize(req.query.pageSize);
+      res.json(await searchObjects(q, prefix, pageSize));
+    }),
+  );
 
   return router;
 }

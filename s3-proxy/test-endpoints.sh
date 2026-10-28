@@ -1,71 +1,69 @@
 #!/bin/bash
+# Smoke-test the S3 proxy endpoints against a running server.
+#
+# Usage:
+#   API_KEY=your-key ./test-endpoints.sh
+#   API_KEY=your-key BASE_URL=http://localhost:5284 ./test-endpoints.sh
+#
+# API_KEY is required and must match the running server's .env. BASE_URL
+# defaults to the port in .env.example; override it if the server runs elsewhere.
+set -u
 
-# Test script for S3 Proxy endpoints
-# Make sure to set your API_KEY before running
-
-# Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Configuration
-BASE_URL="http://localhost:5284"
-API_KEY="${API_KEY:-your-api-key-here}"
+BASE_URL="${BASE_URL:-http://localhost:5284}"
 
-if [ "$API_KEY" = "your-api-key-here" ]; then
-  echo -e "${RED}Error: Please set the API_KEY environment variable${NC}"
+if [ -z "${API_KEY:-}" ]; then
+  echo -e "${RED}Error: API_KEY environment variable is not set${NC}"
   echo "Usage: API_KEY=your-key ./test-endpoints.sh"
   exit 1
 fi
 
-echo -e "${BLUE}Testing S3 Proxy Server${NC}"
-echo "Base URL: $BASE_URL"
+if ! command -v jq >/dev/null 2>&1; then
+  echo -e "${RED}Error: jq is required (brew install jq)${NC}"
+  exit 1
+fi
+
+# Print the HTTP status and body for a request. Arguments: label, expected
+# status, then the curl arguments.
+request() {
+  local label="$1" expected="$2"
+  shift 2
+  echo -e "${BLUE}${label}${NC}"
+  local body status
+  body=$(curl -s -w '\n%{http_code}' "$@")
+  status=$(echo "$body" | tail -n1)
+  body=$(echo "$body" | sed '$d')
+  echo "$body" | jq '.' 2>/dev/null || echo "$body"
+  if [ "$status" = "$expected" ]; then
+    echo -e "${GREEN}HTTP ${status} (expected ${expected})${NC}"
+  else
+    echo -e "${RED}HTTP ${status} (expected ${expected})${NC}"
+    FAILURES=$((FAILURES + 1))
+  fi
+  echo ""
+}
+
+FAILURES=0
+echo -e "${BLUE}Testing S3 Proxy Server at ${BASE_URL}${NC}"
 echo ""
 
-# Test 1: Health Check (no auth required)
-echo -e "${BLUE}1. Testing Health Check (no auth)${NC}"
-curl -s "$BASE_URL/health" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
+request "1. Health check (no auth)" 200 "$BASE_URL/health"
+request "2. List root prefixes" 200 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/prefixes"
+request "3. List root objects" 200 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/objects?pageSize=10"
+request "4. Search for 'test'" 200 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/search?q=test&pageSize=5"
+request "5. Wrong API key" 401 -H "x-api-key: wrong-key" "$BASE_URL/api/s3/prefixes"
+request "6. Missing API key" 401 "$BASE_URL/api/s3/prefixes"
+request "7. Invalid pageSize" 400 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/objects?pageSize=abc"
+request "8. Missing search query" 400 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/search"
+request "9. Repeated prefix param" 400 -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/prefixes?prefix=a&prefix=b"
 
-# Test 2: List Root Prefixes (folders at root level)
-echo -e "${BLUE}2. Testing List Root Prefixes${NC}"
-curl -s -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/prefixes" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-# Test 3: List Root Objects (files at root level)
-echo -e "${BLUE}3. Testing List Root Objects${NC}"
-curl -s -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/objects?pageSize=10" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-# Test 4: List Objects with Prefix (modify if you know a folder name)
-echo -e "${BLUE}4. Testing List Objects with Prefix (optional)${NC}"
-echo "Skipping - add your own prefix to test"
-# Uncomment and modify the line below to test a specific folder:
-# curl -s -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/objects?prefix=your-folder-name/&pageSize=10" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-# Test 5: Search Objects (modify search term as needed)
-echo -e "${BLUE}5. Testing Search Objects${NC}"
-echo "Searching for 'test'"
-curl -s -H "x-api-key: $API_KEY" "$BASE_URL/api/s3/search?q=test&pageSize=5" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-# Test 6: Test Authentication Failure
-echo -e "${BLUE}6. Testing Auth Failure (should return 401)${NC}"
-curl -s -H "x-api-key: wrong-key" "$BASE_URL/api/s3/prefixes" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-# Test 7: Test Missing API Key
-echo -e "${BLUE}7. Testing Missing API Key (should return 401)${NC}"
-curl -s "$BASE_URL/api/s3/prefixes" | jq '.' || echo -e "${RED}Failed${NC}"
-echo ""
-echo ""
-
-echo -e "${GREEN}Testing complete!${NC}"
+if [ "$FAILURES" -eq 0 ]; then
+  echo -e "${GREEN}All checks passed${NC}"
+else
+  echo -e "${RED}${FAILURES} check(s) failed${NC}"
+  exit 1
+fi

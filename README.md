@@ -1,6 +1,8 @@
 # S3 Contentful App
 
-A Contentful app that allows browsing and selecting assets from an S3 bucket through a secure proxy server.
+A Contentful app that lets editors browse an S3 bucket and attach selected files to a
+JSON field, with asset URLs served through CloudFront. Listing calls run inside a
+Contentful app function, so there is no separate server to deploy or operate.
 
 > **Disclaimer:** This code is provided as-is for use as a reference implementation. It is not officially supported by Contentful. Use at your own discretion and modify as needed for your specific requirements.
 
@@ -8,112 +10,114 @@ A Contentful app that allows browsing and selecting assets from an S3 bucket thr
 
 ```mermaid
 graph LR
-    A[Contentful CMS] -->|Hosts| B[Contentful App<br/>React Frontend]
-    B -->|API Requests<br/>+ API Key| C[S3 Proxy Server<br/>Node.js/Express]
-    C -->|AWS SDK| D[AWS S3 Bucket]
-    D -->|Asset URLs| E[CloudFront CDN]
-    E -->|Delivers Assets| B
-
-    style B fill:#f9f,stroke:#333,stroke-width:2px
-    style C fill:#bbf,stroke:#333,stroke-width:2px
-    style D fill:#ff9,stroke:#333,stroke-width:2px
-    style E fill:#9f9,stroke:#333,stroke-width:2px
+    A[Contentful web app] -->|hosts| B[Contentful App<br/>React frontend]
+    B -->|app action call via CMA| C[s3Proxy function<br/>runs on Contentful]
+    C -->|SigV4-signed ListObjectsV2<br/>via fetch + aws4fetch| D[AWS S3 bucket]
+    D -->|keys, sizes, dates| C
+    C -->|objects with CloudFront URLs| B
+    E[CloudFront CDN] -->|delivers assets| B
 ```
 
-### How It Works
+### How it works
 
-1. **Contentful App** (Frontend) runs inside Contentful's CMS interface
-2. User browses folders/files through the React UI
-3. **App makes authenticated requests** to the S3 Proxy Server using API Key
-4. **S3 Proxy Server** validates the API key and fetches data from S3 using AWS SDK
-5. **S3 objects are listed** and their URLs are generated using the CloudFront domain
-6. **Assets are delivered** through CloudFront CDN for optimal performance
+1. The **Contentful app** (frontend) runs inside the Contentful web app in three
+   locations: the configuration screen, a JSON field editor, and a picker dialog.
+2. When an editor browses, searches or opens a folder, the frontend calls the `s3Api`
+   **app action** through the Content Management API (`sdk.cma.appActionCall`).
+3. Contentful runs the **`s3Proxy` function** on its own infrastructure. The function
+   reads the AWS credentials from the app's installation parameters, signs a
+   ListObjectsV2 request with AWS Signature Version 4 and calls S3 directly.
+4. The function returns object keys, sizes, dates and a `displayUrl` built from the
+   configured CloudFront domain. The frontend stores the selected objects in the field.
+5. Assets themselves are delivered by **CloudFront**; the app never touches object data.
 
-### Why a Proxy Server?
+### Why a function instead of a separate proxy server
 
-The proxy server is essential for security and functionality:
+Earlier versions of this app required a self-hosted Node.js/Express proxy (still in
+`s3-proxy/`, see "Legacy Express proxy" below). The proxy existed for two reasons: the
+browser must never hold AWS credentials, and S3 does not answer cross-origin browser
+requests. A Contentful app function solves both without anything to host:
 
-1. **AWS Credentials Protection** - AWS access keys never reach the browser. The frontend only knows a simple API key, while sensitive AWS credentials remain safely on the server.
+- **Nothing to deploy or run.** The function is uploaded with the app bundle
+  (`npm run upload`) and executed by Contentful. There is no server, container, DNS name,
+  TLS certificate, uptime monitoring or API key for the frontend to hold.
+- **Credentials stay server-side.** The AWS secret key is a `Secret`-type installation
+  parameter: redacted whenever a user reads it (App SDK or CMA), raw only inside the
+  function.
+- **Egress is allowlisted.** The manifest restricts the function's outbound traffic to
+  `*.amazonaws.com`, and the function only builds request hosts from a validated region.
+- **One install.** Everything is configured on the app's configuration screen; the
+  separate proxy `.env`, CORS allowlist and shared API key all go away.
 
-2. **Single API Key** - Instead of embedding AWS credentials in the Contentful app (where they could be exposed), you only pass a single revocable API key that has limited permissions.
+### Why aws4fetch
 
-3. **CORS Handling** - The proxy server properly handles CORS headers, allowing the Contentful app to make cross-origin requests. Direct browser-to-S3 requests would be blocked by CORS policies.
+The Contentful Functions sandbox is not a full Node.js runtime: it has no `http` or
+`https` modules (verified against the Functions limitations table, 2026-10-27). The AWS
+SDK for JavaScript (`@aws-sdk/client-s3`) depends on them through its default Node request
+handler, so it cannot run there. What the sandbox does provide is the global `fetch` and
+the Web Crypto API. `aws4fetch` is a 16 KB, zero-dependency library that produces AWS
+Signature Version 4 requests using exactly those two APIs, which makes it a natural fit:
+S3's ListObjectsV2 is a plain signed GET, and the XML it returns is parsed by a small
+purpose-built extractor in the function. The result is a function bundle of about 16 KB
+with no native or Node-only dependencies.
 
-4. **Request Control** - The proxy can implement rate limiting, request validation, and logging - giving you control over how S3 is accessed.
-
-5. **Abstraction Layer** - If you need to change S3 buckets, AWS accounts, or even switch cloud providers, you only update the proxy server without touching the Contentful app.
-
-6. **No Client-Side AWS SDK** - Avoids bundling the large AWS SDK in your frontend, keeping the app lightweight.
-
-## Project Structure
+## Project structure
 
 ```
-contentful-app/     - Contentful app frontend (React + Vite)
-s3-proxy/          - Node.js proxy server for S3 API
+contentful-app/                  Contentful app: frontend, function, deploy scripts
+  src/                           React frontend (config screen, field, dialog)
+  src/lib/s3Proxy.ts             Frontend side of the app action call
+  functions/s3Proxy.ts           The function (see functions/README.md)
+  contentful-app-manifest.json   Function id, allowNetworks, action parametersSchema
+  scripts/test-proxy.mts         Local harness: runs the handler against live S3
+  scripts/set-parameter-definitions.mts  Defines installation parameters (Secret type)
+  .env.example                   Variables for the scripts above
+s3-proxy/                        Legacy Express proxy, no longer required
 ```
 
-## Setup
+## Gotchas (read before setup)
 
-### 1. S3 Proxy Server Setup
+- **The field editor and "Test connection" do not work until the bundle is uploaded,
+  the app action exists, and the app is installed in the environment.** Only the frontend
+  can run locally; the function always runs on Contentful. App action calls are scoped
+  to an app installation, so they fail in an environment where the app is not installed.
+- **Every listing costs seconds, not milliseconds.** An app action call goes browser to
+  CMA to function to S3 and back, and the CMA polls for the result. Expect roughly one to
+  several seconds per folder open, page or search. The dialog caches the root folder list
+  for 5 minutes and remembers the last folder to limit round trips.
+- **Run `npm run set-parameter-definitions -- --execute` before installing.** Without
+  installation parameter definitions on the app definition, every value (including the
+  AWS secret key) is stored as a plain, readable parameter. The definitions make
+  `awsSecretAccessKey` a `Secret`. If the app was already installed before the
+  definitions existed, re-save its configuration afterwards.
+- **Secret re-save behaviour is unverified.** The config screen receives only a redacted
+  value for the saved secret and sends that same value back when you save without
+  entering a new one, on the assumption that Contentful preserves the stored secret.
+  Verify this once per install: save the configuration without touching the secret, then
+  click "Test connection". A `SignatureDoesNotMatch` error would mean the secret was
+  overwritten; re-enter it.
+- **The access key ID, region, bucket and CloudFront domain are readable by anyone with
+  access to the space.** Only the secret is hidden. Use a dedicated IAM user whose only
+  permission is `s3:ListBucket` on this bucket (policy below).
+- Search is a filename filter over up to 10 ListObjectsV2 calls (10,000 keys) under the
+  current folder. On a large bucket it can return `hasMore: true` with few results;
+  browse into a folder first to narrow it.
+- The app must be assigned to a **JSON object** field. It stores an array of asset
+  objects (`key`, `name`, `size`, `lastModified`, `eTag`, `isImage`, `displayUrl`).
+- `npm run build` runs `tsc` first, so type errors fail the build. The function has its
+  own tsconfig; `npm run typecheck` checks both trees.
 
-#### Install Dependencies
+## Setup from scratch
 
-```bash
-cd s3-proxy
-npm install
-```
+Prerequisites: a Contentful organization you can create apps in, an AWS account with the
+bucket and a CloudFront distribution in front of it, Node.js 22.18 or newer (the scripts
+use built-in TypeScript type stripping), and npm.
 
-#### Configure Environment Variables
+### 1. AWS: IAM user and CloudFront
 
-Create a `.env` file in the `s3-proxy` directory:
-
-```bash
-cd s3-proxy
-# Edit .env and fill in all values
-```
-
-Required environment variables:
-
-```env
-# Server Configuration
-PORT=5284
-NODE_ENV=development
-
-# API Key for Contentful App Authentication
-API_KEY=
-
-# AWS Configuration
-AWS_REGION=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-
-# S3 Configuration
-S3_BUCKET_NAME=
-
-# CloudFront Configuration
-CLOUDFRONT_DOMAIN=
-```
-
-#### Where to Find AWS Values
-
-**API_KEY** - Generate a secure random key:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-**AWS_REGION** - Find in AWS S3 Console next to your bucket (e.g., `us-east-1`)
-
-**AWS_ACCESS_KEY_ID & AWS_SECRET_ACCESS_KEY**:
-
-1. Go to **IAM** → **Users** in AWS Console
-2. Select your user (or create new user)
-3. Go to **Security credentials** tab
-4. Click **Create access key**
-5. Choose **Application running outside AWS**
-6. Save both the Access Key ID and Secret Access Key
-
-**Recommended IAM Policy** for the user:
+Create an IAM user for the app with this policy, then create an access key for it
+(IAM > Users > Security credentials > Create access key > Application running outside
+AWS):
 
 ```json
 {
@@ -121,171 +125,207 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:GetObject"],
-      "Resource": [
-        "arn:aws:s3:::YOUR-BUCKET-NAME",
-        "arn:aws:s3:::YOUR-BUCKET-NAME/*"
-      ]
+      "Action": ["s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::YOUR-BUCKET-NAME"]
     }
   ]
 }
 ```
 
-**S3_BUCKET_NAME** - Your S3 bucket name from AWS S3 Console
+Only `s3:ListBucket` is needed: the function lists keys; it never reads object bodies.
 
-**CLOUDFRONT_DOMAIN** - Your CloudFront distribution domain (e.g., `d1234567890abc.cloudfront.net`)
+CloudFront is what actually delivers the files, and it lets the bucket stay private:
 
-#### CloudFront Setup
+1. CloudFront > Create distribution. Origin domain: your S3 bucket. Origin access: Origin
+   Access Control (create a control setting if needed).
+2. Default cache behaviour: Viewer protocol policy "Redirect HTTP to HTTPS", allowed
+   methods GET and HEAD, cache policy CachingOptimized.
+3. After creation, copy the bucket policy CloudFront shows and apply it to the bucket
+   (Permissions > Bucket policy). Direct S3 access can then be denied entirely.
+4. Note the distribution domain name, e.g. `d1234abcd.cloudfront.net`.
 
-**Why CloudFront is Required:**
+### 2. Create the app definition
 
-CloudFront provides critical security benefits:
+In the Contentful web app open your organization settings > Apps > Create app, and set:
 
-1. **Prevents Direct S3 Access** - With Origin Access Control (OAC), your S3 bucket can be configured to deny all direct public access. Only CloudFront can access the bucket, preventing anyone from bypassing your proxy server by guessing S3 URLs.
+- Frontend URL: leave empty if you will host the frontend on Contentful with
+  `npm run upload`, or `http://localhost:3000` while developing.
+- Locations: App configuration screen, Entry field (check only JSON object), Dialog.
 
-2. **Private S3 Buckets** - Your S3 bucket remains completely private. Even if someone discovers your bucket name, they cannot access any files directly. All access must go through CloudFront, which only CloudFront (via OAC) can reach.
+Or run `npm run create-app-definition` from `contentful-app/` for the same prompts.
 
-3. **HTTPS Enforcement** - CloudFront enforces HTTPS for all asset delivery, ensuring encrypted connections for all media files.
+### 3. Environment file for the scripts
 
-4. **Geo-Restrictions** - CloudFront allows you to restrict content delivery by geographic location if needed.
+Create `contentful-app/.env` from `.env.example`. It is used by the deploy scripts and the
+local function tester only, never by the app at runtime:
 
-5. **DDoS Protection** - CloudFront provides built-in AWS Shield Standard protection against DDoS attacks.
+```env
+CONTENTFUL_ORG_ID=your-organization-id
+CONTENTFUL_APP_DEF_ID=your-app-definition-id
+CONTENTFUL_ACCESS_TOKEN=your-cma-personal-access-token
 
-**Setup Steps:**
-
-1. Go to **CloudFront** in AWS Console
-2. Click **Create Distribution**
-3. **Origin Settings**:
-   - **Origin Domain**: Select your S3 bucket
-   - **Origin Access**: Choose "Origin Access Control settings (recommended)"
-   - Create new control setting if needed
-4. **Default Cache Behavior**:
-   - **Viewer Protocol Policy**: Redirect HTTP to HTTPS
-   - **Allowed HTTP Methods**: GET, HEAD
-   - **Cache Policy**: CachingOptimized
-   - **Origin Request Policy**: CORS-S3Origin
-5. Click **Create Distribution**
-6. Wait for deployment (5-10 minutes)
-7. **Update S3 Bucket Policy**:
-   - Copy the policy shown in CloudFront
-   - Apply it to your S3 bucket under Permissions → Bucket Policy
-8. Copy the **Distribution Domain Name** for your `.env` file
-
-#### Start the Server
-
-```bash
-cd s3-proxy
-npm start
+# only for npm run test:proxy
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+S3_BUCKET_NAME=
+CLOUDFRONT_DOMAIN=d1234abcd.cloudfront.net
 ```
 
-You should see:
+The scripts read this file and the process environment only. There is no fallback to the
+Contentful CLI's cached login or to AWS CLI profiles; a missing variable is an error that
+names it.
 
-```
-🚀 S3 Proxy Server running at: http://localhost:5284
-```
-
-#### Test the Server
-
-**Quick Health Check:**
-
-```bash
-curl http://localhost:5284/health
-```
-
-Expected: `{"status":"ok","service":"s3-proxy"}`
-
-**Test S3 Endpoints:**
-
-```bash
-# Replace YOUR_API_KEY with your actual API key from .env
-curl -H "x-api-key: YOUR_API_KEY" http://localhost:5284/api/s3/prefixes
-```
-
-**Run Full Test Suite:**
-
-```bash
-chmod +x test-endpoints.sh
-API_KEY=your-actual-api-key ./test-endpoints.sh
-```
-
-See [s3-proxy/TEST_GUIDE.md](s3-proxy/TEST_GUIDE.md) for detailed testing instructions.
-
-### 2. Contentful App Setup
-
-#### Install Dependencies
+### 4. Define installation parameters, build, upload, create the action
 
 ```bash
 cd contentful-app
 npm install
+npm run set-parameter-definitions            # dry run: shows current and proposed
+npm run set-parameter-definitions -- --execute
+npm run build
+npm run upload
+npm run upsert-actions
 ```
 
-#### Development
+- `set-parameter-definitions` writes the installation parameter definitions to the app
+  definition (this is what makes the secret key a `Secret`).
+- `build` type-checks, builds the frontend into `build/` and the function into
+  `build/functions/s3Proxy.js`.
+- `upload` uploads `build/` as an app bundle (frontend plus function) and activates it.
+  Both `upload` and `upsert-actions` go through `scripts/run-app-scripts.mts`, which
+  loads `.env` and passes the values as explicit `--ci` flags. You do not need to export
+  anything in your shell, and the CLI's interactive browser login (which would cache a
+  token into `.env` by itself) is never used.
+- `upsert-actions` creates or updates the `s3Api` app action from
+  `contentful-app-manifest.json`. The frontend calls the function only through this
+  action, so this step is not optional.
+
+### 5. Install and configure
+
+1. Install the app into the space and environment. The configuration screen asks for
+   the AWS region, access key ID, secret access key, bucket name, CloudFront domain and
+   the per-field maximum. Save.
+2. Click "Test connection". It calls the deployed function with the saved values and
+   reports the bucket and region, or a specific error (wrong region, bad credentials,
+   missing bucket, not installed).
+3. In the content model, add a JSON object field and select this app on its Appearance
+   tab.
+
+## Local development
 
 ```bash
 cd contentful-app
 npm run dev
 ```
 
-#### Build for Production
+Serves the frontend on http://localhost:3000; set that as the app definition's frontend
+URL while developing. The function still runs on Contentful, so listing from a local
+frontend requires the uploaded bundle, the app action and an installation (steps 4 and 5).
+
+## Testing the function locally (isolated harness)
+
+`scripts/test-proxy.mts` imports the real `handler` from `functions/s3Proxy.ts` and calls
+it on your machine with a synthetic event and context, hitting live S3. No bundle upload,
+no installation, no CMA round trip.
+
+Caveats first:
+
+- This is not an end-to-end test. It bypasses the action's `parametersSchema`
+  validation, the sandbox's `allowNetworks` restriction and real installation parameters.
+  A run that passes here can still fail in Contentful if the manifest or action wiring is
+  wrong; use "Testing the deployed function" below for that.
+- Credentials come from `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `S3_BUCKET_NAME` and `CLOUDFRONT_DOMAIN`, from the environment or `contentful-app/.env`.
+  All five are required; the script exits naming any that are missing.
+- The script exits 2 on any `ok: false` result so it can be used from other tooling.
 
 ```bash
 cd contentful-app
-npm run build
+npm run test:proxy -- testConnection
+npm run test:proxy -- listPrefixes
+npm run test:proxy -- listPrefixes images/
+npm run test:proxy -- listObjects images/ 10
+npm run test:proxy -- listObjects images/ 10 <nextContinuationToken>
+npm run test:proxy -- search logo images/ 25
 ```
 
-The built files will be in `contentful-app/build/`.
+The output is the handler's own log lines (request URL, HTTP status and timing per S3
+call) followed by the JSON the frontend would receive. Error paths are testable too, for
+example `AWS_REGION=eu-west-1 npm run test:proxy -- testConnection` for the wrong-region
+message, or `AWS_SECRET_ACCESS_KEY=wrong ...` for the 403 message.
 
-#### Deploy to Contentful
+## Testing the deployed function
 
-1. Build the app: `npm run build`
-2. In Contentful:
-   - Go to **Apps** → **Manage Apps**
-   - Create new app or edit existing
-   - **Hosting Options:**
-     - **Option A (Recommended): Host in Contentful** - Upload the `build/` folder contents directly using Contentful's app hosting (available for organization apps)
-     - **Option B: External Hosting** - Host on a static hosting service (Netlify, Vercel, S3+CloudFront, etc.) and provide the URL
-   - Configure installation parameters:
-     - **Proxy URL**: `http://localhost:5284` (for development) or your deployed proxy URL (for production)
-     - **API Key**: The same key from your proxy `.env` file
-     - **CloudFront Domain**: Your CloudFront domain (without https://)
-     - **Max Files**: Maximum number of files to allow selection (optional)
+App action calls are scoped to an installation, so this only works after step 5. Set
+`SPACE_ID` and `ENVIRONMENT_ID` to where the app is installed; the call uses that
+installation's saved credentials.
+
+```bash
+cd contentful-app
+set -a; source .env; set +a
+SPACE_ID=your-space-id
+ENVIRONMENT_ID=master
+curl -s -X POST \
+  "https://api.contentful.com/spaces/$SPACE_ID/environments/$ENVIRONMENT_ID/app_installations/$CONTENTFUL_APP_DEF_ID/actions/s3Api/calls" \
+  -H "Authorization: Bearer $CONTENTFUL_ACCESS_TOKEN" \
+  -H "Content-Type: application/vnd.contentful.management.v1+json" \
+  -d '{"parameters":{"action":"testConnection"}}'
+```
+
+The call is asynchronous. Take `sys.id` from the response and poll:
+
+```bash
+curl -s "https://api.contentful.com/spaces/$SPACE_ID/environments/$ENVIRONMENT_ID/actions/s3Api/calls/CALL_ID_HERE" \
+  -H "Authorization: Bearer $CONTENTFUL_ACCESS_TOKEN"
+```
+
+`response.body` holds the function's JSON, e.g. `{"ok":true,"bucket":"...","region":"us-east-1"}`.
+Function logs are in the web app under organization settings > Apps > this app >
+Functions > s3Proxy.
+
+## The s3Api action
+
+Parameters (validated by Contentful against the manifest's `parametersSchema`):
+
+| Parameter           | Type    | Used by                 | Rules                                   |
+| ------------------- | ------- | ----------------------- | --------------------------------------- |
+| `action`            | string  | all                     | `listPrefixes`, `listObjects`, `search`, `testConnection` |
+| `prefix`            | string  | listPrefixes, listObjects, search | max 500 chars, no `..`; trailing `/` added |
+| `pageSize`          | integer | listObjects, search     | 1 to 200, default 25                    |
+| `continuationToken` | string  | listObjects             | `nextContinuationToken` from a previous page |
+| `q`                 | string  | search                  | required, 1 to 200 chars, case-insensitive filename substring |
+
+Results are `{ ok: true, ... }` or `{ ok: false, error, status? }`. The handler never
+throws; a rejected action call means the function or action is not deployed or the app is
+not installed. See `contentful-app/functions/README.md` for the dispatch and error table.
 
 ## Troubleshooting
 
-### Server won't start
+- **`upload` or `upsert-actions` fails with 401 and the request shows `Bearer ... true`**:
+  the CLI received an empty token. This happens when `contentful-app-scripts` is run by
+  hand with `$CONTENTFUL_ACCESS_TOKEN` in a shell that has not loaded `.env`. Use the npm
+  scripts, which load `.env` themselves.
+- **"Could not invoke the S3 proxy function"**: the app is not installed in this
+  environment, the bundle has not been uploaded, or `npm run upsert-actions` has not been
+  run.
+- **"App is not configured: missing ..."**: save the configuration screen with every
+  value filled in.
+- **"Bucket ... is not in region ..."**: S3 answered with a redirect; fix the region.
+- **"S3 rejected the request (SignatureDoesNotMatch / InvalidAccessKeyId)"**: wrong key
+  or secret. If this appears right after re-saving the configuration without changing
+  the secret, see the Secret re-save gotcha above.
+- **"S3 rejected the request (AccessDenied)"**: the IAM user lacks `s3:ListBucket` on
+  the bucket.
+- **Thumbnails do not load**: the CloudFront domain is wrong or the distribution does not
+  have access to the bucket. Open a `displayUrl` from the field directly to check.
 
-- Check all `.env` values are filled in
-- Verify AWS credentials are correct
-- Check port 5284 isn't already in use
+## Legacy Express proxy
 
-### 500 errors on S3 endpoints
-
-- Verify AWS credentials have S3 permissions
-- Check S3 bucket name is correct
-- Verify AWS region matches your bucket's region
-
-### Empty results
-
-- Make sure your S3 bucket has files in it
-- Try searching for a filename you know exists
-- Check CloudFront domain is correct (for asset URLs)
-
-### CORS errors
-
-- Make sure CloudFront is properly configured
-- Verify the proxy server is running
-- Check that the proxy URL in Contentful matches your server
-
-## API Endpoints
-
-The S3 proxy provides the following endpoints:
-
-- `GET /health` - Health check (no auth required)
-- `GET /api/s3/prefixes?prefix=path/` - List folders at a path
-- `GET /api/s3/objects?prefix=path/&pageSize=25&continuationToken=token` - List files with pagination
-- `GET /api/s3/search?q=searchterm&prefix=path/&pageSize=25` - Search for files
-
-All `/api/s3/*` endpoints require the `x-api-key` header.
+`s3-proxy/` is the previous architecture: a self-hosted Node.js server that held the AWS
+credentials and was called by the frontend with a shared API key. It is no longer used by
+the app and is kept only for reference. Its own README section lives in
+`s3-proxy/TEST_GUIDE.md`. Delete the directory once you no longer need it.
 
 ## License
 
