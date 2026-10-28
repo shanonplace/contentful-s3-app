@@ -127,9 +127,9 @@ const Dialog = () => {
   // already navigated away from cannot overwrite the current listing.
   const requestIdRef = useRef(0);
 
-  // Fetched fresh on every dialog open. An earlier version cached this list in
-  // sessionStorage for 5 minutes, which hid folders created after the first
-  // open; the fetch runs alongside the file listing so the cache saved nothing.
+  // Fetched fresh on every dialog open, in parallel with the file listing, so
+  // folders created since the last open always appear. Not cached on purpose:
+  // a cached list would hide new folders and save no visible time.
   const loadPrefixes = useCallback(async () => {
     try {
       const response = await fetchPrefixes(sdk, "");

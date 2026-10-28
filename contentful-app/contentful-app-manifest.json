@@ -3,7 +3,7 @@
     {
       "id": "s3Proxy",
       "name": "S3 listing proxy",
-      "description": "Lists objects and folders in the configured S3 bucket with AWS credentials held in installation parameters. Replaces a self-hosted proxy server. Read-only: ListObjectsV2 only.",
+      "description": "Lists objects and folders in the configured S3 bucket with AWS credentials held in installation parameters. Read-only: ListObjectsV2 only.",
       "path": "functions/s3Proxy.js",
       "entryFile": "functions/s3Proxy.ts",
       "allowNetworks": [

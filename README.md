@@ -31,12 +31,12 @@ graph LR
    configured CloudFront domain. The frontend stores the selected objects in the field.
 5. Assets themselves are delivered by **CloudFront**; the app never touches object data.
 
-### Why a function instead of a separate proxy server
+### Why the listing runs in a function
 
-Earlier versions of this app required a self-hosted Node.js/Express proxy. It existed
-for two reasons: the browser must never hold AWS credentials, and S3 does not answer
-cross-origin browser requests. A Contentful app function solves both without anything
-to host:
+Two constraints shape any S3 browser inside Contentful: the browser must never hold AWS
+credentials, and S3 does not answer cross-origin browser requests. Both call for a
+server-side component between the editor and S3. A Contentful app function is that
+component, with nothing to host:
 
 - **Nothing to deploy or run.** The function is uploaded with the app bundle
   (`npm run upload`) and executed by Contentful. There is no server, container, DNS name,
@@ -46,8 +46,9 @@ to host:
   function.
 - **Egress is allowlisted.** The manifest restricts the function's outbound traffic to
   `*.amazonaws.com`, and the function only builds request hosts from a validated region.
-- **One install.** Everything is configured on the app's configuration screen; the
-  separate proxy `.env`, CORS allowlist and shared API key all go away.
+- **One install.** Everything is configured on the app's configuration screen: AWS
+  credentials, bucket, CloudFront domain and the per-field limit. There is no second
+  system to configure or keep in sync.
 
 ### Why aws4fetch
 

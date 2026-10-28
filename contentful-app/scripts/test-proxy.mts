@@ -16,8 +16,6 @@
 //
 // Credentials come from AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 // S3_BUCKET_NAME and CLOUDFRONT_DOMAIN, from the environment or from .env.
-// These are the same names the retired Express proxy used, so its .env can be
-// copied over.
 
 import { handler } from "../functions/s3Proxy.ts";
 import { loadDotenv, requireEnv } from "./lib/env.mts";

@@ -6,11 +6,11 @@ import type {
   FunctionTypeEnum,
 } from "@contentful/node-apps-toolkit";
 
-// This function replaces the self-hosted Express proxy that earlier versions
-// of this app required. It runs on Contentful's infrastructure, reads the AWS
-// credentials from the app's installation parameters (the secret key is a
-// Secret-type parameter, so editors never see it) and performs a fixed set of
-// read-only ListObjectsV2 calls against one configured bucket.
+// This function runs on Contentful's infrastructure, reads the AWS credentials
+// from the app's installation parameters (the secret key is a Secret-type
+// parameter, so editors never see it) and performs a fixed set of read-only
+// ListObjectsV2 calls against one configured bucket. The browser never holds
+// AWS credentials and never talks to S3 directly.
 //
 // Why aws4fetch instead of @aws-sdk/client-s3: the Contentful Functions
 // sandbox has no Node http/https modules, and the AWS SDK's default Node

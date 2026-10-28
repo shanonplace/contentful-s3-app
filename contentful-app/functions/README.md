@@ -1,8 +1,8 @@
 # s3Proxy function internals
 
 This documents the logic inside `s3Proxy.ts`, the app-action function that performs
-the browser's S3 listing calls. For the outer picture (why a function instead of a
-separate proxy server, how the bundle is deployed, how to test) see the project README.
+the browser's S3 listing calls. For the outer picture (why the listing runs in a
+function, how the bundle is deployed, how to test) see the project README.
 
 ## Runtime constraints that shaped the code
 
