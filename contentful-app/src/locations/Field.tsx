@@ -14,6 +14,13 @@ import { isConfigured } from "../utils";
 import { AssetThumbnail } from "../components/AssetThumbnail";
 
 const styles = {
+  // The iframe's width is often fractional, so an element at exactly 100%
+  // can land a sub-pixel past the edge and lose its right border to the
+  // document's overflow-x: hidden. Keep a small gutter on that side.
+  root: css({
+    paddingRight: "2px",
+    paddingBottom: "2px",
+  }),
   assetList: css({
     display: "flex",
     flexDirection: "column",
@@ -96,7 +103,7 @@ const Field = () => {
   }
 
   return (
-    <div>
+    <div className={styles.root}>
       {assets.length === 0 ? (
         <Text fontColor="gray500">No assets selected</Text>
       ) : (

@@ -20,12 +20,7 @@ import {
   sessionGet,
   sessionSet,
 } from "../utils";
-import {
-  CACHE_DURATION,
-  PREFIX_CACHE_KEY,
-  LAST_PREFIX_KEY,
-  DEFAULT_PAGE_SIZE,
-} from "../constants";
+import { LAST_PREFIX_KEY, DEFAULT_PAGE_SIZE } from "../constants";
 import { FolderTree } from "../components/FolderTree";
 import { AssetGrid } from "../components/AssetGrid";
 import { Breadcrumb } from "../components/Breadcrumb";
@@ -80,28 +75,6 @@ const styles = {
   }),
 };
 
-interface CachedPrefixes {
-  timestamp: number;
-  prefixes: S3Prefix[];
-}
-
-function readPrefixCache(): S3Prefix[] | null {
-  const cached = sessionGet(PREFIX_CACHE_KEY);
-  if (!cached) return null;
-  try {
-    const parsed: CachedPrefixes = JSON.parse(cached);
-    if (
-      Array.isArray(parsed.prefixes) &&
-      Date.now() - parsed.timestamp < CACHE_DURATION
-    ) {
-      return parsed.prefixes;
-    }
-  } catch {
-    // Corrupt cache entry: fall through and refetch.
-  }
-  return null;
-}
-
 const Dialog = () => {
   const sdk = useSDK<DialogAppSDK>();
 
@@ -111,6 +84,8 @@ const Dialog = () => {
   // maxFiles here is the number of slots left on the field, not the
   // installation-wide limit. Field computes it before opening the dialog.
   const { maxFiles, currentAssets } = invocationParams;
+  const alreadyOnField = currentAssets?.length ?? 0;
+  const fieldLimit = maxFiles + alreadyOnField;
 
   // Assets already on the field are shown but cannot be selected again.
   const existingKeys = useMemo(
@@ -132,8 +107,9 @@ const Dialog = () => {
   const [hasMore, setHasMore] = useState(false);
 
   // Every listing is an app action call (browser to CMA to function to S3 and
-  // back), which costs seconds rather than milliseconds. The folder cache and
-  // the stale-request guard below exist to keep that from compounding.
+  // back), which costs seconds rather than milliseconds. The folder and file
+  // fetches on open run in parallel, and the stale-request guard below keeps
+  // slow responses from overwriting newer ones.
   //
   // Refs rather than state: loadObjects must keep a stable identity, or the
   // mount effect that depends on it would re-run after every page load.
@@ -142,23 +118,13 @@ const Dialog = () => {
   // already navigated away from cannot overwrite the current listing.
   const requestIdRef = useRef(0);
 
+  // Fetched fresh on every dialog open. An earlier version cached this list in
+  // sessionStorage for 5 minutes, which hid folders created after the first
+  // open; the fetch runs alongside the file listing so the cache saved nothing.
   const loadPrefixes = useCallback(async () => {
     try {
-      const cached = readPrefixCache();
-      if (cached) {
-        setPrefixes(cached);
-        return;
-      }
-
       const response = await fetchPrefixes(sdk, "");
       setPrefixes(response.prefixes);
-      sessionSet(
-        PREFIX_CACHE_KEY,
-        JSON.stringify({
-          timestamp: Date.now(),
-          prefixes: response.prefixes,
-        } satisfies CachedPrefixes)
-      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load folders");
     } finally {
@@ -388,10 +354,10 @@ const Dialog = () => {
 
       <div className={styles.footer}>
         <Text fontColor="gray500">
-          {selected.size} of {maxFiles} selected
-          {existingKeys.size > 0
-            ? ` (${existingKeys.size} already on the field)`
-            : ""}
+          {selected.size} selected. The field holds {alreadyOnField} of {fieldLimit}
+          {maxFiles - selected.size > 0
+            ? `, so ${maxFiles - selected.size} more can be added.`
+            : ", so no more can be added."}
         </Text>
         <Flex gap="spacingM">
           <Button variant="secondary" onClick={handleCancel}>

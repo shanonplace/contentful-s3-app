@@ -16,10 +16,16 @@ const styles = {
   card: css({
     cursor: "pointer",
     transition: "all 0.15s ease",
-    position: "relative",
     "&:hover": {
       boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
     },
+  }),
+  // Positioning context for the checkmark, "Already added" label and tooltip.
+  // Kept on an inner div because f36's Card styles override a className's
+  // layout properties (see AssetThumbnail).
+  body: css({
+    position: "relative",
+    minWidth: 0,
   }),
   selectedCard: css({
     border: "2px solid #0066ff",
@@ -155,52 +161,58 @@ function AssetCard({ asset, isSelected, isDisabled, onClick }: AssetCardProps) {
       onClick={isDisabled ? undefined : onClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      padding="none"
     >
-      {isSelected && (
-        <CheckCircleIcon className={styles.checkmark} size="medium" />
-      )}
-      {isDisabled && <span className={styles.disabledLabel}>Already added</span>}
+      <div className={styles.body}>
+        {isSelected && (
+          <CheckCircleIcon className={styles.checkmark} size="medium" />
+        )}
+        {isDisabled && (
+          <span className={styles.disabledLabel}>Already added</span>
+        )}
 
-      {asset.isImage ? (
-        <img
-          src={asset.displayUrl}
-          alt={asset.name}
-          className={styles.thumbnail}
-          loading="lazy"
-        />
-      ) : (
-        <div className={styles.placeholder}>
-          <AssetIcon size="large" />
-        </div>
-      )}
+        {asset.isImage ? (
+          <img
+            src={asset.displayUrl}
+            alt={asset.name}
+            className={styles.thumbnail}
+            loading="lazy"
+          />
+        ) : (
+          <div className={styles.placeholder}>
+            <AssetIcon size="large" />
+          </div>
+        )}
 
-      <div className={styles.info}>
-        <div className={styles.name} title={asset.name}>
-          {asset.name}
+        <div className={styles.info}>
+          <div className={styles.name} title={asset.name}>
+            {asset.name}
+          </div>
+          <div className={styles.meta}>
+            {formatFileSize(asset.size)} &middot;{" "}
+            {formatDate(asset.lastModified)}
+          </div>
         </div>
-        <div className={styles.meta}>
-          {formatFileSize(asset.size)} &middot; {formatDate(asset.lastModified)}
-        </div>
+
+        {showTooltip && (
+          <div className={styles.tooltip}>
+            <div>
+              <strong>{asset.name}</strong>
+            </div>
+            <div>Size: {formatFileSize(asset.size)}</div>
+            <div>Modified: {formatDate(asset.lastModified)}</div>
+            <div
+              style={{
+                maxWidth: "300px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              Key: {asset.key}
+            </div>
+          </div>
+        )}
       </div>
-
-      {showTooltip && (
-        <div className={styles.tooltip}>
-          <div>
-            <strong>{asset.name}</strong>
-          </div>
-          <div>Size: {formatFileSize(asset.size)}</div>
-          <div>Modified: {formatDate(asset.lastModified)}</div>
-          <div
-            style={{
-              maxWidth: "300px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            Key: {asset.key}
-          </div>
-        </div>
-      )}
     </Card>
   );
 }

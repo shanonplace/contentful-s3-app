@@ -5,11 +5,17 @@ import type { S3Asset } from "../types";
 import { formatFileSize, formatDate } from "../utils";
 
 const styles = {
-  card: css({
+  // Layout lives on an inner div, not on the Card: f36's Card injects its own
+  // emotion styles for display and padding after ours, so a className on the
+  // Card itself loses and the row collapses into a stacked block.
+  row: css({
     display: "flex",
     alignItems: "center",
     gap: "12px",
     padding: "12px",
+    // Let the text column shrink below its content width so the long URL
+    // truncates instead of widening the card past the field iframe.
+    minWidth: 0,
   }),
   thumbnail: css({
     width: "64px",
@@ -71,45 +77,51 @@ export function AssetThumbnail({ asset, onRemove }: AssetThumbnailProps) {
   };
 
   return (
-    <Card className={styles.card}>
-      {asset.isImage ? (
-        <img
-          src={asset.displayUrl}
-          alt={asset.name}
-          className={styles.thumbnail}
-        />
-      ) : (
-        <div className={styles.placeholder}>
-          <AssetIcon size="medium" />
-        </div>
-      )}
+    <Card padding="none">
+      <div className={styles.row}>
+        {asset.isImage ? (
+          <img
+            src={asset.displayUrl}
+            alt={asset.name}
+            className={styles.thumbnail}
+          />
+        ) : (
+          <div className={styles.placeholder}>
+            <AssetIcon size="medium" />
+          </div>
+        )}
 
-      <div className={styles.info}>
-        <div className={styles.name} title={asset.name}>
-          {asset.name}
+        <div className={styles.info}>
+          <div className={styles.name} title={asset.name}>
+            {asset.name}
+          </div>
+          <div className={styles.meta}>
+            {formatFileSize(asset.size)} &middot;{" "}
+            {formatDate(asset.lastModified)}
+          </div>
+          <div className={styles.url} title={asset.displayUrl}>
+            {asset.displayUrl}
+          </div>
         </div>
-        <div className={styles.meta}>
-          {formatFileSize(asset.size)} &middot; {formatDate(asset.lastModified)}
-        </div>
-        <div className={styles.url} title={asset.displayUrl}>
-          {asset.displayUrl}
-        </div>
-      </div>
 
-      <div className={styles.actions}>
-        <CopyButton value={asset.displayUrl} tooltipProps={{ placement: "top" }} />
-        <IconButton
-          variant="transparent"
-          aria-label="Open in new tab"
-          icon={<ExternalLinkIcon />}
-          onClick={handleOpenUrl}
-        />
-        <IconButton
-          variant="transparent"
-          aria-label="Remove asset"
-          icon={<DeleteIcon />}
-          onClick={() => onRemove(asset)}
-        />
+        <div className={styles.actions}>
+          <CopyButton
+            value={asset.displayUrl}
+            tooltipProps={{ placement: "top" }}
+          />
+          <IconButton
+            variant="transparent"
+            aria-label="Open in new tab"
+            icon={<ExternalLinkIcon />}
+            onClick={handleOpenUrl}
+          />
+          <IconButton
+            variant="transparent"
+            aria-label="Remove asset"
+            icon={<DeleteIcon />}
+            onClick={() => onRemove(asset)}
+          />
+        </div>
       </div>
     </Card>
   );

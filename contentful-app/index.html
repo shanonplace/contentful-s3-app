@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>S3 Asset Picker - Contentful App</title>
+    <style>
+      /* The field location runs in an auto-resized iframe. The SDK sets the
+         iframe height to the bottom edge of the content, which excludes a
+         horizontal scrollbar's own height, so a horizontal bar forces a
+         vertical bar whose width then re-creates the horizontal one. Never
+         show a horizontal bar; the content truncates with ellipses instead.
+         The default body margin is zeroed for the same reason. */
+      html, body { margin: 0; padding: 0; overflow-x: hidden; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
